@@ -126,6 +126,7 @@ TestServerListsOnlyReadToolsAndSearchesWithCursor は、MCP の公開ツール�
 機能:
   - 公式 MCP クライアントで Streamable HTTP へ接続する
   - 読み取り専用の3ツールだけが公開されることを確認する
+  - 初期化応答のinstructionsが空で、tool説明が所定の機能説明だけであることを確認する
   - 複合検索条件、構造化結果、日時とIDのカーソル往復を確認する
 
 引数:
@@ -157,6 +158,12 @@ func TestServerListsOnlyReadToolsAndSearchesWithCursor(t *testing.T) {
 	if initializeResult == nil || initializeResult.Capabilities == nil {
 		t.Fatal("InitializeResult の capabilities がありません")
 	}
+	if initializeResult.Instructions != "" {
+		t.Errorf(
+			"InitializeResult の instructions = %q, 空文字を期待",
+			initializeResult.Instructions,
+		)
+	}
 	capabilities := initializeResult.Capabilities
 	if capabilities.Tools == nil || capabilities.Tools.ListChanged {
 		t.Errorf("tools capability = %+v, 静的なtool一覧を期待", capabilities.Tools)
@@ -175,6 +182,15 @@ func TestServerListsOnlyReadToolsAndSearchesWithCursor(t *testing.T) {
 	if len(tools.Tools) != 3 {
 		t.Fatalf("ListTools() length = %d, 期待値は 3", len(tools.Tools))
 	}
+	expectedDescriptions := map[string]string{
+		"list_sources": "NewsStoreの取得対象設定名とIDを一覧します。無効な設定も含みます。",
+		"search_articles": "NewsStoreに保存済みの記事を新しい順に検索します。" +
+			"取得対象、日時範囲、最大5語のAND条件を組み合わせられます。" +
+			"日時を両方指定した場合は入力順を問わず、早い方から遅い方までを検索します。" +
+			"本文は500文字以内の抜粋で返します。",
+		"get_article": "NewsStore内の記事をIDで参照します。" +
+			"本文は負荷を抑えるため分割して返します。",
+	}
 	toolByName := make(map[string]*mcp.Tool, len(tools.Tools))
 	for _, tool := range tools.Tools {
 		toolByName[tool.Name] = tool
@@ -186,6 +202,14 @@ func TestServerListsOnlyReadToolsAndSearchesWithCursor(t *testing.T) {
 		}
 		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
 			t.Errorf("%s の readOnlyHint が true ではありません", name)
+		}
+		if tool.Description != expectedDescriptions[name] {
+			t.Errorf(
+				"%s の説明 = %q, 期待値は %q",
+				name,
+				tool.Description,
+				expectedDescriptions[name],
+			)
 		}
 		if tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
 			t.Errorf("%s の destructiveHint が false ではありません", name)

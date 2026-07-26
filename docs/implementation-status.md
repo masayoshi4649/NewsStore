@@ -87,6 +87,7 @@
 47. 記事検索の最大件数欄には `conf/mcp.toml` の `DefaultArticleLimit` を初期値として表示する。検索語欄は見出しの「AND」表記だけを残し、同じ意味の補足文を置かない。
 48. `dist/Windows` と `dist/linux` はそれぞれ単独で配布できる単位とし、実行ファイル、`conf/conf.toml.sample`、配布用 README、LICENSE を含める。Web 資産と PostgreSQL マイグレーションはバイナリ埋め込みのため外部配置しない。
 49. 配布物には認証情報を含み得る実設定をコピーしない。`dist` の各 `conf` には `conf.toml.sample` だけを置き、利用者が初回起動前に `.toml` へコピーして接続情報を設定する。
+50. MCP 初期化応答の `instructions` は設定せず、tool 説明は機能と入出力だけを記載する。
 
 ## 検証記録
 

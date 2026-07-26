@@ -18,6 +18,7 @@ MCP は既存の HTTP サーバーへ同居させ、管理画面と同じ待受�
 - セッション、SSE、MCP のログ配信機能は使用しない。
 - resources と prompts は公開しない。
 - tools は `list_sources`、`search_articles`、`get_article` の 3 個だけを公開する。
+- 初期化応答の `instructions` は設定せず、各 tool の説明は機能と入出力だけを記載する。
 - リクエストの `Content-Type` は `application/json` を必須とする。
 - リクエスト本文は 1 MiB を上限とする。
 - `Origin` ヘッダーは検証せず、付与の有無や値にかかわらず受け付ける。
