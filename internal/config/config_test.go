@@ -12,7 +12,7 @@ import (
 TestDefault は、Default がアプリケーションの既定値を返すことを検証します。
 
 機能:
-  - システム、PostgreSQL、ワーカー、HTTPの主要な既定設定値を確認する
+  - システム、PostgreSQL、ワーカー、HTTP、MCPの主要な既定設定値を確認する
 
 引数:
   - t *testing.T: テスト状態を管理する値
@@ -57,6 +57,13 @@ func TestDefault(t *testing.T) {
 	}
 	if cfg.HTTP.UserAgent != "NewsStore/0.1" {
 		t.Errorf("HTTP.UserAgent = %q, 期待値は %q", cfg.HTTP.UserAgent, "NewsStore/0.1")
+	}
+	if cfg.MCP.DefaultArticleLimit != 20 {
+		t.Errorf(
+			"MCP.DefaultArticleLimit = %d, 期待値は %d",
+			cfg.MCP.DefaultArticleLimit,
+			20,
+		)
 	}
 }
 
@@ -104,6 +111,10 @@ concurrency = 7
 [http]
 max_response_bytes = 4096
 `)
+	writeTestFile(t, dir, "15-mcp.toml", `
+[MCP]
+DefaultArticleLimit = 40
+`)
 
 	cfg, err := LoadDir(dir)
 	if err != nil {
@@ -139,6 +150,13 @@ max_response_bytes = 4096
 	}
 	if cfg.HTTP.MaxResponseBytes != 4096 {
 		t.Errorf("HTTP.MaxResponseBytes = %d, 期待値は %d", cfg.HTTP.MaxResponseBytes, 4096)
+	}
+	if cfg.MCP.DefaultArticleLimit != 40 {
+		t.Errorf(
+			"MCP.DefaultArticleLimit = %d, 期待値は %d",
+			cfg.MCP.DefaultArticleLimit,
+			40,
+		)
 	}
 }
 
@@ -254,6 +272,7 @@ func TestValidate(t *testing.T) {
 	cfg.Postgres.MaxIdleConns = cfg.Postgres.MaxOpenConns + 1
 	cfg.Worker.Concurrency = 0
 	cfg.HTTP.Timeout = Duration{}
+	cfg.MCP.DefaultArticleLimit = 0
 
 	err := cfg.Validate()
 	if err == nil {
@@ -269,6 +288,7 @@ func TestValidate(t *testing.T) {
 		"postgres.max_idle_conns",
 		"worker.concurrency",
 		"http.timeout",
+		"MCP.DefaultArticleLimit",
 	} {
 		if !strings.Contains(err.Error(), expected) {
 			t.Errorf("Validate() error = %q, %q を含むことを期待", err, expected)
@@ -345,6 +365,35 @@ func TestValidateRejectsResourceLimitOverflow(t *testing.T) {
 		if !strings.Contains(err.Error(), expected) {
 			t.Errorf("Validate() error = %q, %q を含むことを期待", err, expected)
 		}
+	}
+}
+
+// ----------------------------------------
+
+/*
+TestValidateRejectsMCPDefaultArticleLimitOverflow は、MCP の既定記事件数上限を検証します。
+
+機能:
+  - MCPの既定記事件数が許容範囲を超えた設定を拒否することを確認する
+
+引数:
+  - t *testing.T: テスト状態を管理する値
+
+返り値:
+  - なし
+*/
+func TestValidateRejectsMCPDefaultArticleLimitOverflow(t *testing.T) {
+	t.Parallel()
+
+	cfg := Default()
+	cfg.Postgres.Host = "db"
+	cfg.Postgres.Username = "news"
+	cfg.Postgres.DBName = "newsstore"
+	cfg.MCP.DefaultArticleLimit = maxMCPArticleLimit + 1
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "MCP.DefaultArticleLimit") {
+		t.Fatalf("Validate() error = %v, MCP既定記事件数の上限エラーを期待", err)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/masayoshi4649/NewsStore/internal/connector/reuters"
 	"github.com/masayoshi4649/NewsStore/internal/connector/rss"
 	"github.com/masayoshi4649/NewsStore/internal/ingest"
+	"github.com/masayoshi4649/NewsStore/internal/mcpserver"
 	"github.com/masayoshi4649/NewsStore/internal/netpolicy"
 	"github.com/masayoshi4649/NewsStore/internal/scheduler"
 	"github.com/masayoshi4649/NewsStore/internal/store/postgres"
@@ -245,10 +246,11 @@ func parseOptions(command string, args []string) (commandOptions, error) {
 // ----------------------------------------
 
 /*
-serve は、定期取得ワーカーと Gin 管理画面を起動します。
+serve は、定期取得ワーカー、Gin 管理画面、MCP サーバーを起動します。
 
 機能:
   - OS シグナルで終了するルートコンテキストを作る
+  - 管理画面と記事参照専用 MCP を同じ HTTP サーバーへ載せる
   - スケジューラーと HTTP サーバーを並行起動する
   - 終了時に HTTP サーバーを猶予付きで停止する
 
@@ -281,10 +283,27 @@ func serve(
 		cfg.Worker.Concurrency,
 		logger,
 	)
-	webServer, err := web.New(store, manager, logger)
+	webServer, err := web.New(
+		store,
+		manager,
+		logger,
+		cfg.MCP.DefaultArticleLimit,
+	)
 	if err != nil {
 		return err
 	}
+	mcpServer, err := mcpserver.New(
+		store,
+		cfg.MCP.DefaultArticleLimit,
+		logger,
+	)
+	if err != nil {
+		return fmt.Errorf("MCP サーバーを初期化できません: %w", err)
+	}
+	applicationHandler := newApplicationHandler(
+		webServer.Handler(),
+		mcpServer.Handler(),
+	)
 
 	schedulerDone := make(chan struct{})
 	go func() {
@@ -295,16 +314,22 @@ func serve(
 	listenAddress := fmt.Sprintf(":%d", cfg.System.Port)
 	httpServer := &http.Server{
 		Addr:              listenAddress,
-		Handler:           webServer.Handler(),
+		Handler:           applicationHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      75 * time.Second,
 		IdleTimeout:       90 * time.Second,
 	}
 
 	serverErrors := make(chan error, 1)
 	go func() {
-		logger.Info("管理画面を起動しました", "address", listenAddress)
+		logger.Info(
+			"管理画面と MCP サーバーを起動しました",
+			"address",
+			listenAddress,
+			"mcp_endpoint",
+			"/mcp",
+		)
 		serverErrors <- httpServer.ListenAndServe()
 	}()
 
@@ -332,6 +357,32 @@ func serve(
 			schedulerErr,
 		)
 	}
+}
+
+// ----------------------------------------
+
+/*
+newApplicationHandler は、管理画面と MCP の HTTP 経路を合成します。
+
+機能:
+  - /mcp だけを記事参照専用 MCP ハンドラーへ渡す
+  - その他の経路を既存 Gin 管理画面へ渡す
+
+引数:
+  - webHandler http.Handler: 管理画面とヘルスチェックのハンドラー
+  - mcpHandler http.Handler: MCP Streamable HTTP ハンドラー
+
+返り値:
+  - http.Handler: 単一ポートで両機能を提供するルートハンドラー
+*/
+func newApplicationHandler(
+	webHandler http.Handler,
+	mcpHandler http.Handler,
+) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", mcpHandler)
+	mux.Handle("/", webHandler)
+	return mux
 }
 
 // ----------------------------------------

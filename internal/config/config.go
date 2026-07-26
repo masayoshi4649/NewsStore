@@ -24,6 +24,7 @@ const (
 	defaultHTTPTimeout         = 20 * time.Second
 	defaultHTTPMaxResponseSize = int64(8 * 1024 * 1024)
 	defaultHTTPUserAgent       = "NewsStore/0.1"
+	defaultMCPArticleLimit     = 20
 	maxPostgresConnections     = 1000
 	minWorkerPollInterval      = time.Second
 	maxWorkerPollInterval      = 24 * time.Hour
@@ -31,6 +32,7 @@ const (
 	minHTTPTimeout             = time.Second
 	maxHTTPTimeout             = 5 * time.Minute
 	maxHTTPResponseSize        = int64(64 * 1024 * 1024)
+	maxMCPArticleLimit         = 100
 )
 
 // Duration は、TOML の文字列で指定された期間を保持します。
@@ -44,6 +46,7 @@ type Config struct {
 	Postgres PostgresConfig `toml:"postgres"`
 	Worker   WorkerConfig   `toml:"worker"`
 	HTTP     HTTPConfig     `toml:"http"`
+	MCP      MCPConfig      `toml:"MCP"`
 }
 
 // SystemConfig は、NewsStore 全体のシステム設定を保持します。
@@ -78,11 +81,16 @@ type HTTPConfig struct {
 	AllowPrivateNetworks bool     `toml:"allow_private_networks"`
 }
 
+// MCPConfig は、読み取り専用 MCP の記事参照設定を保持します。
+type MCPConfig struct {
+	DefaultArticleLimit int `toml:"DefaultArticleLimit"`
+}
+
 /*
 Default は、アプリケーション設定の既定値を生成します。
 
 機能:
-  - サーバー、PostgreSQL、ワーカー、外部HTTPの安全な既定値を組み立てる
+  - サーバー、PostgreSQL、ワーカー、外部HTTP、MCPの安全な既定値を組み立てる
 
 引数:
   - なし
@@ -110,6 +118,9 @@ func Default() Config {
 			Timeout:          Duration{Duration: defaultHTTPTimeout},
 			MaxResponseBytes: defaultHTTPMaxResponseSize,
 			UserAgent:        defaultHTTPUserAgent,
+		},
+		MCP: MCPConfig{
+			DefaultArticleLimit: defaultMCPArticleLimit,
 		},
 	}
 }
@@ -186,7 +197,7 @@ func LoadDir(dir string) (Config, error) {
 Validate は、アプリケーション設定が実行可能な値であることを検証します。
 
 機能:
-  - 待受、DB、ワーカー、外部HTTPの範囲と相関条件をまとめて検証する
+  - 待受、DB、ワーカー、外部HTTP、MCPの範囲と相関条件をまとめて検証する
   - 検出した複数の不正値を結合して返す
 
 引数:
@@ -328,6 +339,19 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.HTTP.UserAgent) == "" {
 		validationErrors = append(validationErrors, errors.New("http.user_agent は空にできません"))
+	}
+
+	// ----------------------------------------
+
+	if c.MCP.DefaultArticleLimit < 1 || c.MCP.DefaultArticleLimit > maxMCPArticleLimit {
+		validationErrors = append(
+			validationErrors,
+			fmt.Errorf(
+				"MCP.DefaultArticleLimit は 1 以上 %d 以下である必要があります: %d",
+				maxMCPArticleLimit,
+				c.MCP.DefaultArticleLimit,
+			),
+		)
 	}
 
 	return errors.Join(validationErrors...)

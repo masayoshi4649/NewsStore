@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	csrfCookieName = "newsstore_csrf"
-	csrfFormName   = "_csrf"
-	csrfContextKey = "csrf_token"
+	csrfCookieName                  = "newsstore_csrf"
+	csrfFormName                    = "_csrf"
+	csrfContextKey                  = "csrf_token"
+	maxConcurrentArticleAPIRequests = 8
 )
 
 //go:embed templates/*.html static/*
@@ -36,14 +37,17 @@ type Queue interface {
 
 // Server は、管理画面が利用する依存関係と Gin エンジンを保持します。
 type Server struct {
-	store     *postgres.Store
-	queue     Queue
-	logger    *slog.Logger
-	template  *template.Template
-	staticCSS []byte
-	staticJS  []byte
-	libraryFS http.FileSystem
-	engine    *gin.Engine
+	store               *postgres.Store
+	queue               Queue
+	logger              *slog.Logger
+	defaultArticleLimit int
+	template            *template.Template
+	staticCSS           []byte
+	staticJS            []byte
+	articleJS           []byte
+	libraryFS           http.FileSystem
+	engine              *gin.Engine
+	articleAPISlots     chan struct{}
 }
 
 /*
@@ -58,6 +62,7 @@ New は、NewsStore の Gin 管理画面を生成します。
   - store *postgres.Store: 管理画面が操作する PostgreSQL Repository
   - queue Queue: 手動取得を受け付けるジョブキュー
   - logger *slog.Logger: サーバーエラーを記録するロガー
+  - defaultArticleLimit ...int: 記事APIで件数未指定時に使う既定件数
 
 返り値:
   - *Server: 初期化済みの Web サーバー
@@ -67,9 +72,16 @@ func New(
 	store *postgres.Store,
 	queue Queue,
 	logger *slog.Logger,
+	defaultArticleLimit ...int,
 ) (*Server, error) {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	articleLimit := defaultWebArticleLimit
+	if len(defaultArticleLimit) > 0 &&
+		defaultArticleLimit[0] >= 1 &&
+		defaultArticleLimit[0] <= maxWebArticleLimit {
+		articleLimit = defaultArticleLimit[0]
 	}
 
 	parsedTemplate, err := template.New("管理画面").Funcs(template.FuncMap{
@@ -89,19 +101,26 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("取得対象フォーム JavaScript を読み込めません: %w", err)
 	}
+	articleJS, err := assets.ReadFile("static/articles.js")
+	if err != nil {
+		return nil, fmt.Errorf("記事画面 JavaScript を読み込めません: %w", err)
+	}
 	libraryFS, err := webassets.FileSystem()
 	if err != nil {
 		return nil, err
 	}
 
 	server := &Server{
-		store:     store,
-		queue:     queue,
-		logger:    logger,
-		template:  parsedTemplate,
-		staticCSS: staticCSS,
-		staticJS:  staticJS,
-		libraryFS: libraryFS,
+		store:               store,
+		queue:               queue,
+		logger:              logger,
+		defaultArticleLimit: articleLimit,
+		template:            parsedTemplate,
+		staticCSS:           staticCSS,
+		staticJS:            staticJS,
+		articleJS:           articleJS,
+		libraryFS:           libraryFS,
+		articleAPISlots:     make(chan struct{}, maxConcurrentArticleAPIRequests),
 	}
 	server.engine = server.buildEngine()
 	return server, nil
@@ -153,7 +172,14 @@ func (s *Server) buildEngine() *gin.Engine {
 	engine.GET("/healthz", s.health)
 	engine.GET("/static/app.css", s.css)
 	engine.GET("/static/source-form.js", s.sourceFormJavaScript)
+	engine.GET("/static/articles.js", s.articlesJavaScript)
 	engine.StaticFS("/lib", s.libraryFS)
+
+	api := engine.Group("/api")
+	api.Use(s.limitArticleAPIConcurrency())
+	api.GET("/articles", s.listArticlesAPI)
+	api.GET("/articles/:id", s.showArticleAPI)
+	api.GET("/sources", s.listSourcesAPI)
 
 	admin := engine.Group("/admin")
 	admin.Use(s.csrf())
@@ -175,6 +201,42 @@ func (s *Server) buildEngine() *gin.Engine {
 		c.String(http.StatusNotFound, "ページが見つかりません")
 	})
 	return engine
+}
+
+// ----------------------------------------
+
+/*
+limitArticleAPIConcurrency は、記事APIの同時実行数を制限します。
+
+機能:
+  - 記事検索、記事詳細、取得対象一覧で共通の実行枠を使用する
+  - 実行枠が満杯の場合は待機せず、再試行可能な503のJSONエラーを返す
+  - 処理完了時に実行枠を必ず解放する
+
+引数:
+  - なし
+
+返り値:
+  - gin.HandlerFunc: 記事APIグループへ適用する同時実行数制限ミドルウェア
+*/
+func (s *Server) limitArticleAPIConcurrency() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		select {
+		case s.articleAPISlots <- struct{}{}:
+			defer func() {
+				<-s.articleAPISlots
+			}()
+			c.Next()
+		default:
+			c.Header("Retry-After", "1")
+			c.Abort()
+			respondArticleAPIError(
+				c,
+				http.StatusServiceUnavailable,
+				"記事APIが混雑しています",
+			)
+		}
+	}
 }
 
 // ----------------------------------------
@@ -212,7 +274,8 @@ func (s *Server) health(c *gin.Context) {
 css は、バイナリへ埋め込んだ管理画面 CSS を返します。
 
 機能:
-  - Content-Type とキャッシュ制御を設定して CSS を配信する
+  - Content-Typeを設定してCSSを配信する
+  - 画面更新時に再検証されるようブラウザーの長期キャッシュを抑止する
 
 引数:
   - c *gin.Context: HTTP リクエストとレスポンスのコンテキスト
@@ -221,7 +284,7 @@ css は、バイナリへ埋め込んだ管理画面 CSS を返します。
   - なし
 */
 func (s *Server) css(c *gin.Context) {
-	c.Header("Cache-Control", "public, max-age=3600")
+	c.Header("Cache-Control", "no-cache")
 	c.Data(http.StatusOK, "text/css; charset=utf-8", s.staticCSS)
 }
 
@@ -242,6 +305,27 @@ sourceFormJavaScript は、取得元種別で設定欄を切り替えるJavaScri
 func (s *Server) sourceFormJavaScript(c *gin.Context) {
 	c.Header("Cache-Control", "public, max-age=3600")
 	c.Data(http.StatusOK, "text/javascript; charset=utf-8", s.staticJS)
+}
+
+// ----------------------------------------
+
+/*
+articlesJavaScript は、記事APIを利用するJavaScriptを返します。
+
+機能:
+  - Content-Typeを設定して埋め込みJavaScriptを配信する
+  - 画面更新時に再検証されるようブラウザーの長期キャッシュを抑止する
+  - 一覧検索と本文分割取得をAxiosから実行する画面処理を公開する
+
+引数:
+  - c *gin.Context: HTTPリクエストとレスポンスのコンテキスト
+
+返り値:
+  - なし
+*/
+func (s *Server) articlesJavaScript(c *gin.Context) {
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/javascript; charset=utf-8", s.articleJS)
 }
 
 // ----------------------------------------

@@ -6,7 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}} | NewsStore</title>
   <link rel="stylesheet" href="/lib/bulma/bulma.min.css">
-  <link rel="stylesheet" href="/static/app.css">
+  {{if eq .Title "記事"}}
+  <link rel="stylesheet" href="/lib/gridjs/theme/mermaid.min.css">
+  {{end}}
+  <link rel="stylesheet" href="/static/app.css?v=20260726-gridjs">
 </head>
 <body>
 <!--
@@ -314,147 +317,220 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
 
 {{define "articles.html"}}
 {{template "header" .Base}}
-<div class="level page-heading">
-  <div class="level-left">
-    <div>
-      <p class="eyebrow">保存データ</p>
-      <h1 class="title is-2">記事</h1>
-      <p class="subtitle is-6 has-text-grey">見出しと本文を検索し、保存されたリビジョンを確認します。</p>
+<!--
+[コンポーネント概要]
+#article-list-page は記事一覧APIを利用する画面全体のルート要素です。
+初期HTMLには記事データを含めず、Axiosで /api/articles を呼び出し、
+Grid.jsでヘッドライン一覧とページングを構築します。
+
+#article-filter-toggle は検索条件の表示と非表示を切り替える details 要素です。
+初期状態では閉じ、検索が必要なときだけ summary から開きます。
+
+#article-filter はすべて省略可能な記事検索条件をコンパクトにまとめます。
+#article-source は /api/sources から取得した設定名と news_sources.id を選択肢として表示します。
+#article-date-from と #article-date-to は「～」で結んだ同一行の日時範囲入力です。
+入力順にかかわらず、早い日時から遅い日時までを検索します。
+#article-keyword-1 から #article-keyword-5 はAND検索する語を1件ずつ入力します。
+各入力はAPI許容境界に合わせて200文字に制限します。
+#article-limit はAPIから受け取る最大件数を指定し、空欄時はサーバー設定値を使用します。
+
+#article-search は入力済み条件で先頭から検索します。
+#article-clear は全条件を消去し、無条件の最新記事検索を実行します。
+#article-error はAPI呼び出しに失敗した場合のエラーを通知します。
+
+#article-grid はAPI結果からGrid.jsがヘッドライン一覧を生成する領域です。
+ページ切り替えはGrid.jsのページング機能で行います。
+-->
+<section id="article-list-page" aria-labelledby="article-list-title">
+  <div class="level page-heading">
+    <div class="level-left">
+      <div>
+        <p class="eyebrow">保存データ</p>
+        <h1 id="article-list-title" class="title is-2">記事</h1>
+        <p class="subtitle is-6 has-text-grey">保存した記事のヘッドラインを確認できます。</p>
+      </div>
     </div>
   </div>
-  <div class="level-right">
-    <span class="tag is-link is-light is-medium">{{.Page.Total}} 件</span>
-  </div>
-</div>
 
-<!--
-#article-filter は記事一覧の取得対象とキーワードを絞り込む Bulma box フォームです。
-#article-query は見出しと本文の部分一致検索語を入力します。
--->
-<form id="article-filter" class="box filter-box" method="get" action="/admin/articles">
-  <div class="columns is-vcentered">
-    <div class="column is-one-third">
-      <div class="field">
-        <label class="label" for="article-source">取得対象</label>
-        <div class="control">
-          <div class="select is-fullwidth">
-            <select id="article-source" name="source_id">
-              <option value="">すべて</option>
-              {{range .Sources}}
-              <option value="{{.ID}}" {{if eq $.SourceID .ID}}selected{{end}}>{{.Name}}</option>
-              {{end}}
-            </select>
+  <details id="article-filter-toggle" class="article-filter-disclosure">
+    <summary>検索条件</summary>
+    <form id="article-filter" class="article-filter-compact" novalidate>
+      <div class="article-filter-layout">
+        <div class="article-filter-primary">
+          <div class="field article-source-field">
+            <label class="label" for="article-source">取得対象</label>
+            <div class="control">
+              <div class="select is-fullwidth">
+                <select id="article-source" name="source_id" aria-describedby="article-source-error">
+                  <option value="">すべての取得対象</option>
+                </select>
+              </div>
+            </div>
+            <p id="article-source-error" class="help has-text-danger" role="alert" hidden></p>
+          </div>
+
+          <div class="field article-date-field">
+            <span class="label">記事日時</span>
+            <div class="article-date-range">
+              <div class="control">
+                <label class="is-sr-only" for="article-date-from">日時1</label>
+                <input id="article-date-from" class="input" name="date_from" type="datetime-local">
+              </div>
+              <span class="article-date-separator" aria-hidden="true">～</span>
+              <div class="control">
+                <label class="is-sr-only" for="article-date-to">日時2</label>
+                <input id="article-date-to" class="input" name="date_to" type="datetime-local">
+              </div>
+            </div>
+          </div>
+
+          <div class="article-filter-bottom">
+            <div class="field article-limit-field">
+              <label class="label" for="article-limit">最大件数</label>
+              <div class="control">
+                <input id="article-limit" class="input" name="limit" type="number"
+                  min="1" max="100" inputmode="numeric" placeholder="既定">
+              </div>
+            </div>
+            <div class="article-filter-actions">
+              <button id="article-search" class="button is-link" type="submit">検索</button>
+              <button id="article-clear" class="button is-light" type="button">クリア</button>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-    <div class="column">
-      <div class="field">
-        <label class="label" for="article-query">キーワード</label>
-        <div class="control">
-          <input id="article-query" class="input" name="q" type="search"
-            value="{{.Keyword}}" placeholder="見出しまたは本文">
-        </div>
-      </div>
-    </div>
-    <div class="column is-narrow">
-      <div class="field filter-submit">
-        <div class="control">
-          <button class="button is-link" type="submit">検索</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</form>
 
-{{if .Page.Items}}
-<div class="box table-card">
-  <div class="table-container">
-    <table class="table is-fullwidth is-hoverable">
-      <thead>
-        <tr>
-          <th>公開日時</th>
-          <th>見出し</th>
-          <th>取得対象</th>
-          <th>取得元</th>
-          <th>取得日時</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Page.Items}}
-        <tr>
-          <td>{{formatTime .PublishedAt}}</td>
-          <td>
-            <a class="headline-link" href="/admin/articles/{{.ID}}">{{.Headline}}</a>
-            <span class="subtext">{{shorten .BodyText 100}}</span>
-          </td>
-          <td>{{.SourceName}}</td>
-          <td><span class="tag is-link is-light">{{.Provider}}</span></td>
-          <td>{{formatTime .FetchedAt}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
+        <fieldset class="article-keyword-panel">
+          <legend class="label">検索語（AND）</legend>
+          <div class="article-keyword-list">
+            <div class="control">
+              <label class="is-sr-only" for="article-keyword-1">検索語1</label>
+              <input id="article-keyword-1" class="input" name="keywords" type="search"
+                maxlength="200" placeholder="検索語 1" aria-describedby="article-keyword-help article-filter-error">
+            </div>
+            <div class="control">
+              <label class="is-sr-only" for="article-keyword-2">検索語2</label>
+              <input id="article-keyword-2" class="input" name="keywords" type="search"
+                maxlength="200" placeholder="検索語 2" aria-describedby="article-keyword-help article-filter-error">
+            </div>
+            <div class="control">
+              <label class="is-sr-only" for="article-keyword-3">検索語3</label>
+              <input id="article-keyword-3" class="input" name="keywords" type="search"
+                maxlength="200" placeholder="検索語 3" aria-describedby="article-keyword-help article-filter-error">
+            </div>
+            <div class="control">
+              <label class="is-sr-only" for="article-keyword-4">検索語4</label>
+              <input id="article-keyword-4" class="input" name="keywords" type="search"
+                maxlength="200" placeholder="検索語 4" aria-describedby="article-keyword-help article-filter-error">
+            </div>
+            <div class="control">
+              <label class="is-sr-only" for="article-keyword-5">検索語5</label>
+              <input id="article-keyword-5" class="input" name="keywords" type="search"
+                maxlength="200" placeholder="検索語 5" aria-describedby="article-keyword-help article-filter-error">
+            </div>
+          </div>
+          <p id="article-keyword-help" class="help">入力したすべての語を含む記事が対象です。</p>
+        </fieldset>
+      </div>
+      <p id="article-filter-error" class="help has-text-danger" role="alert" hidden></p>
+    </form>
+  </details>
+
+  <div id="article-error" class="notification is-danger is-light" role="alert" hidden>
+    <strong>記事を取得できませんでした。</strong>
+    <span id="article-error-message" class="api-error-message"></span>
   </div>
-</div>
-<nav class="pagination is-centered mt-5" aria-label="記事ページ">
-  {{if .PreviousURL}}<a class="pagination-previous" href="{{.PreviousURL}}">前へ</a>{{end}}
-  {{if .NextURL}}<a class="pagination-next" href="{{.NextURL}}">次へ</a>{{end}}
-  <ul class="pagination-list">
-    <li><span class="pagination-link is-current" aria-current="page">{{.CurrentPage}}</span></li>
-  </ul>
-</nav>
-{{else}}
-<section class="box empty-state">
-  <h2 class="title is-4">該当する記事がありません</h2>
-  <p class="has-text-grey">取得対象を手動実行するか、検索条件を変更してください。</p>
+
+  <div id="article-grid" class="article-grid-container" aria-live="polite"></div>
 </section>
-{{end}}
+<script src="/lib/axios/axios.min.js" defer></script>
+<script src="/lib/gridjs/gridjs.umd.js" defer></script>
+<script src="/static/articles.js?v=20260726-gridjs" defer></script>
 {{template "footer" .Base}}
 {{end}}
 
 {{define "article.html"}}
 {{template "header" .Base}}
-<div class="level page-heading">
-  <div class="level-left article-heading">
-    <div>
-      <p class="eyebrow">{{.Article.SourceName}} / {{.Article.Provider}}</p>
-      <h1 class="title is-2">{{.Article.Headline}}</h1>
-      <p class="subtitle is-6 has-text-grey">
-        公開 {{formatTime .Article.PublishedAt}} ・ 取得 {{formatTime .Article.FetchedAt}}
-      </p>
+<!--
+[コンポーネント概要]
+#article-detail-page はURL中の記事IDを使って /api/articles/:id を取得する詳細画面です。
+初期HTMLには記事データを含めず、Axiosの取得完了後に各表示領域へテキストとして設定します。
+
+#article-detail-loading は詳細APIの進行中状態を通知します。
+#article-detail-error は記事が存在しない場合を含むAPIエラーを通知します。
+#article-detail-content は取得成功後だけ表示される記事本文とメタデータです。
+
+#article-detail-headline は記事見出し、#article-detail-body は保存済み本文を表示します。
+#article-detail-canonical-url は安全なHTTPまたはHTTPS URLの場合だけ表示します。
+#article-body-load-more は本文に続きがある場合だけ表示し、次の本文チャンクを追記します。
+-->
+<section id="article-detail-page" aria-labelledby="article-detail-headline">
+  <div class="level page-heading">
+    <div class="level-left article-heading">
+      <div>
+        <p id="article-detail-eyebrow" class="eyebrow">保存記事</p>
+        <h1 id="article-detail-headline" class="title is-2">記事を読み込んでいます</h1>
+        <p id="article-detail-dates" class="subtitle is-6 has-text-grey"></p>
+      </div>
+    </div>
+    <div class="level-right">
+      <a class="button is-light" href="/admin/articles">記事一覧へ戻る</a>
     </div>
   </div>
-  <div class="level-right">
-    <a class="button is-light" href="/admin/articles">記事一覧へ戻る</a>
-  </div>
-</div>
 
-<article class="box article-detail">
+  <div id="article-detail-loading" class="box loading-state" role="status" aria-live="polite">
+    <span class="loading-spinner" aria-hidden="true"></span>
+    <span>記事の本文を取得しています…</span>
+  </div>
+
+  <div id="article-detail-error" class="notification is-danger is-light" role="alert" hidden>
+    <strong>記事を表示できませんでした。</strong>
+    <span id="article-detail-error-message" class="api-error-message"></span>
+    <a class="button is-light is-small mt-4" href="/admin/articles">記事一覧へ戻る</a>
+  </div>
+
+<article id="article-detail-content" class="box article-detail" hidden>
   <dl class="columns is-multiline metadata-list">
+    <div class="column is-one-third">
+      <dt>取得対象</dt>
+      <dd id="article-detail-source"></dd>
+    </div>
+    <div class="column is-one-third">
+      <dt>取得元</dt>
+      <dd id="article-detail-provider"></dd>
+    </div>
+    <div class="column is-one-third">
+      <dt>記事 ID</dt>
+      <dd id="article-detail-id"></dd>
+    </div>
     <div class="column is-half">
       <dt>外部 ID</dt>
-      <dd>{{.Article.ExternalID}}</dd>
+      <dd id="article-detail-external-id"></dd>
     </div>
     <div class="column is-half">
       <dt>リビジョン</dt>
-      <dd>{{.Article.RevisionID}}</dd>
+      <dd id="article-detail-revision-id"></dd>
     </div>
     <div class="column is-half">
       <dt>更新日時</dt>
-      <dd>{{formatTime .Article.UpdatedAt}}</dd>
+      <dd id="article-detail-updated-at"></dd>
     </div>
-    {{if .Article.CanonicalURL}}
-    <div class="column is-half">
+    <div id="article-detail-canonical-field" class="column is-half" hidden>
       <dt>元記事</dt>
-      <dd><a href="{{.Article.CanonicalURL}}" rel="noreferrer" target="_blank">{{.Article.CanonicalURL}}</a></dd>
+      <dd>
+        <a id="article-detail-canonical-url" rel="noopener noreferrer" target="_blank"></a>
+      </dd>
     </div>
-    {{end}}
   </dl>
   <hr>
-  <!-- .article-body は保存済みのプレーンテキスト本文を改行保持して表示します。 -->
-  <pre class="article-body">{{.Article.BodyText}}</pre>
+  <pre id="article-detail-body" class="article-body"></pre>
+  <div id="article-body-load-more-area" class="article-load-more-area" hidden>
+    <button id="article-body-load-more" class="button is-light" type="button">本文の続きを読む</button>
+  </div>
+  <p id="article-body-status" class="help has-text-centered" role="status" aria-live="polite"></p>
 </article>
+</section>
+<script src="/lib/axios/axios.min.js" defer></script>
+<script src="/static/articles.js?v=20260726-gridjs" defer></script>
 {{template "footer" .Base}}
 {{end}}
 

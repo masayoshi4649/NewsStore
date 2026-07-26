@@ -2,6 +2,7 @@
 
 テーブル名は 2 語の `snake_case` に統一し、`news_sources`、`news_articles`、`ingestion_runs`、`schema_migrations` を使用する。
 旧開発スキーマの全テーブルを削除済みであるため、`001_initial.sql` と `002_article_search_trigram.sql` はこの名称で新規作成する初期定義とする。
+通常画面の JSON API と MCP が共有する日時順検索用インデックスは、後続の `003_mcp_article_order.sql` で追加する。
 
 ## `news_sources`
 
@@ -76,6 +77,10 @@ RSS の `external_id` は GUID、リンク、安定情報の SHA-256 の順で�
 RSS にリビジョンがない場合は、見出し、本文、更新日時から SHA-256 を計算する。
 Reuters は API の `id` と `revision_id` を使用する。
 
+通常画面の JSON API と MCP では `COALESCE(published_at, fetched_at)` を記事の実効日時として扱う。
+公開日時がある記事は公開日時、ない記事は取得日時を日時範囲の判定と並べ替えに使用する。
+実効日時の降順、同日時では `id` の降順に並べる。
+
 ## `ingestion_runs`
 
 取得実行の監査情報を保存する。
@@ -111,3 +116,13 @@ SQL はバイナリへ埋め込み、起動設定 `postgres.auto_migrate` が有
 `002_article_search_trigram.sql` が拡張と見出し・本文用インデックスを作成する。
 この索引作成はトランザクション内の通常 `CREATE INDEX` である。
 既存記事が多い DB へ導入する場合は書き込み停止時間と 10 分のマイグレーション期限を事前に検証する。
+
+`003_mcp_article_order.sql` は、通常画面の JSON API と MCP が共有する keyset pagination と並べ替えに対応する次の式インデックスを作成する。
+
+- `news_articles_effective_at_idx`: `COALESCE(published_at, fetched_at) DESC, id DESC`
+- `news_articles_source_effective_at_idx`: `source_id, COALESCE(published_at, fetched_at) DESC, id DESC`
+
+前者は全取得対象の記事検索、後者は `source_id` を指定した記事検索で使用する。
+日時と記事 ID の組をカーソルに含めることで、`COUNT` と `OFFSET` を使わずに次ページを取得する。
+`003_mcp_article_order.sql` もトランザクション内の通常 `CREATE INDEX` で適用するため、
+既存記事が多い DB へ初めて適用する場合は書き込み停止時間と 10 分のマイグレーション期限を事前に検証する。

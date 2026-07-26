@@ -9,7 +9,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/masayoshi4649/NewsStore/internal/domain"
-	"github.com/masayoshi4649/NewsStore/internal/store/postgres"
 )
 
 /*
@@ -88,16 +87,12 @@ func TestTemplatesExecute(t *testing.T) {
 			name: "articles.html",
 			data: articleListPage{
 				Base: base,
-				Page: postgres.ArticlePage{},
 			},
 		},
 		{
 			name: "article.html",
 			data: articleDetailPage{
 				Base: base,
-				Article: postgres.StoredArticle{
-					Article: domain.Article{Headline: "見出し"},
-				},
 			},
 		},
 		{
@@ -230,7 +225,7 @@ func TestCSRFMiddlewareRejectsMissingToken(t *testing.T) {
 TestSecurityHeadersOnStaticAsset は、静的配信にもセキュリティヘッダーが付くことを検証します。
 
 機能:
-  - CSS配信の成功、ダークテーマ、X-Content-Type-Options・Content-Security-Policyを確認する
+  - CSS配信の成功、ダークテーマ、Grid.js用テーマ、X-Content-Type-Options・Content-Security-Policyを確認する
 
 引数:
   - t *testing.T: テスト状態を管理する値
@@ -256,11 +251,23 @@ func TestSecurityHeadersOnStaticAsset(t *testing.T) {
 	if recorder.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Error("X-Content-Type-Options ヘッダーが正しくありません")
 	}
+	if recorder.Header().Get("Cache-Control") != "no-cache" {
+		t.Errorf(
+			"Cache-Control = %q, 期待値はno-cache",
+			recorder.Header().Get("Cache-Control"),
+		)
+	}
 	if !strings.Contains(recorder.Header().Get("Content-Security-Policy"), "default-src 'self'") {
 		t.Error("Content-Security-Policy ヘッダーが正しくありません")
 	}
 	if !strings.Contains(recorder.Body.String(), "color-scheme: dark") {
 		t.Error("管理画面CSSがダークテーマを既定にしていません")
+	}
+	if !strings.Contains(
+		recorder.Body.String(),
+		".article-grid-container .gridjs-footer",
+	) {
+		t.Error("記事一覧のGrid.js用ダークテーマを確認できません")
 	}
 }
 
@@ -339,5 +346,124 @@ func TestLocalBulmaAsset(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), ".button") {
 		t.Error("Bulma CSSの内容を確認できません")
+	}
+}
+
+// ----------------------------------------
+
+/*
+TestArticleJavaScriptAssets は、記事API画面のローカルJavaScript資産を検証します。
+
+機能:
+  - web/libのAxios、Grid.jsと埋め込み済み記事画面JavaScriptへアクセスできることを確認する
+  - 一覧がGrid.jsの10件ページングと安全な仮想DOMを利用することを確認する
+  - 記事詳細が本文分割APIと安全なTextNode追記を利用することを確認する
+  - 更新対象の記事画面JavaScriptが長期キャッシュされないことを確認する
+
+引数:
+  - t *testing.T: テスト状態を管理する値
+
+返り値:
+  - なし
+*/
+func TestArticleJavaScriptAssets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	server, err := New(nil, nil, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	testCases := []struct {
+		name            string
+		path            string
+		wantValues      []string
+		forbiddenValues []string
+		wantCache       string
+	}{
+		{
+			name:       "Axios",
+			path:       "/lib/axios/axios.min.js",
+			wantValues: []string{"axios"},
+		},
+		{
+			name:       "Grid.js",
+			path:       "/lib/gridjs/gridjs.umd.js",
+			wantValues: []string{"gridjs", "Grid"},
+		},
+		{
+			name: "記事画面",
+			path: "/static/articles.js",
+			wantValues: []string{
+				"window.axios.get",
+				"new window.gridjs.Grid",
+				"window.gridjs.h",
+				"#article-keyword-1",
+				"#article-keyword-5",
+				"new Date(normalizedFromValue) > new Date(normalizedToValue)",
+				`params.set("date_from", normalizedFromValue)`,
+				`params.set("date_to", normalizedToValue)`,
+				"limit: 10",
+				"summary: false",
+				"updateConfig({ data: gridData }).forceRender()",
+				"/api/articles",
+				"body_offset",
+				"textContent",
+				"appendChild(document.createTextNode(bodyChunk))",
+			},
+			forbiddenValues: []string{
+				"body.textContent +=",
+				"articleListState.nextCursor",
+				`querySelector("#article-load-more")`,
+				"body_excerpt",
+				"最新の記事を取得しています",
+				"続きがあります",
+				"開始日時は終了日時以前にしてください",
+			},
+			wantCache: "no-cache",
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, testCase.path, nil)
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("状態コード = %d, 期待値は200", recorder.Code)
+			}
+			if contentType := recorder.Header().Get("Content-Type"); !strings.Contains(
+				contentType,
+				"javascript",
+			) {
+				t.Errorf("Content-Type = %q, JavaScriptを期待", contentType)
+			}
+			if testCase.wantCache != "" &&
+				recorder.Header().Get("Cache-Control") != testCase.wantCache {
+				t.Errorf(
+					"Cache-Control = %q, 期待値は%q",
+					recorder.Header().Get("Cache-Control"),
+					testCase.wantCache,
+				)
+			}
+			for _, value := range testCase.wantValues {
+				if !strings.Contains(recorder.Body.String(), value) {
+					t.Errorf("%s に %q がありません", testCase.path, value)
+				}
+			}
+			for _, value := range testCase.forbiddenValues {
+				if strings.Contains(recorder.Body.String(), value) {
+					t.Errorf("%s に不要な %q があります", testCase.path, value)
+				}
+			}
+			if !strings.Contains(
+				recorder.Header().Get("Content-Security-Policy"),
+				"script-src 'self'",
+			) {
+				t.Error("CSPが同一オリジンJavaScriptに制限されていません")
+			}
+		})
 	}
 }

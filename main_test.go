@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -94,6 +96,89 @@ func TestWaitForScheduler(t *testing.T) {
 		context.DeadlineExceeded,
 	) {
 		t.Errorf("期限超過 error = %v, DeadlineExceededを期待", err)
+	}
+}
+
+// ----------------------------------------
+
+/*
+TestNewApplicationHandlerRoutesMCPAndWeb は、単一ポート内のHTTP経路分離を検証します。
+
+機能:
+  - /mcp をMCPハンドラーへ渡すことを確認する
+  - 管理画面とヘルスチェックの経路を既存Webハンドラーへ渡すことを確認する
+
+引数:
+  - t *testing.T: テスト状態を管理する値
+
+返り値:
+  - なし
+*/
+func TestNewApplicationHandlerRoutesMCPAndWeb(t *testing.T) {
+	t.Parallel()
+
+	webHandler := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("X-Test-Handler", "web")
+		writer.WriteHeader(http.StatusOK)
+	})
+	mcpHandler := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("X-Test-Handler", "mcp")
+		writer.WriteHeader(http.StatusAccepted)
+	})
+	handler := newApplicationHandler(webHandler, mcpHandler)
+
+	testCases := []struct {
+		name        string
+		method      string
+		path        string
+		wantStatus  int
+		wantHandler string
+	}{
+		{
+			name:        "MCP",
+			method:      http.MethodPost,
+			path:        "/mcp",
+			wantStatus:  http.StatusAccepted,
+			wantHandler: "mcp",
+		},
+		{
+			name:        "管理画面",
+			method:      http.MethodGet,
+			path:        "/",
+			wantStatus:  http.StatusOK,
+			wantHandler: "web",
+		},
+		{
+			name:        "ヘルスチェック",
+			method:      http.MethodGet,
+			path:        "/healthz",
+			wantStatus:  http.StatusOK,
+			wantHandler: "web",
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			request := httptest.NewRequest(testCase.method, testCase.path, nil)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != testCase.wantStatus {
+				t.Errorf(
+					"状態コード = %d, 期待値は %d",
+					recorder.Code,
+					testCase.wantStatus,
+				)
+			}
+			if actual := recorder.Header().Get("X-Test-Handler"); actual != testCase.wantHandler {
+				t.Errorf(
+					"処理ハンドラー = %q, 期待値は %q",
+					actual,
+					testCase.wantHandler,
+				)
+			}
+		})
 	}
 }
 
