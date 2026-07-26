@@ -139,7 +139,7 @@ New は、記事参照専用の MCP HTTP サーバーを生成します。
 機能:
   - 取得対象一覧、記事検索、記事詳細の3ツールだけを登録する
   - セッション、SSE、通知を使わないステートレス JSON 応答を設定する
-  - Origin、Content-Type、要求サイズ、同時実行数を HTTP 境界で制限する
+  - Content-Type、要求サイズ、同時実行数を HTTP 境界で制限する
 
 引数:
   - reader ArticleReader: 読み取り専用の記事 Repository
@@ -499,7 +499,7 @@ func (s *Server) getArticle(
 protectHTTP は、MCP Streamable HTTP の受信条件を制限します。
 
 機能:
-  - Origin 付き要求、POST 以外、JSON 以外、圧縮要求を拒否する
+  - POST 以外、JSON 以外、圧縮要求を拒否する
   - Content-Length と同時実行数を上限内へ制限する
   - MCP 応答を保存しないよう Cache-Control を設定する
 
@@ -514,10 +514,6 @@ func (s *Server) protectHTTP(next http.Handler) http.Handler {
 		writer.Header().Set("Cache-Control", "no-store")
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 
-		if len(request.Header.Values("Origin")) > 0 {
-			http.Error(writer, "Origin 付きの要求は受け付けていません", http.StatusForbidden)
-			return
-		}
 		if request.Method != http.MethodPost {
 			writer.Header().Set("Allow", http.MethodPost)
 			http.Error(writer, "POST だけを利用できます", http.StatusMethodNotAllowed)

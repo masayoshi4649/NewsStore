@@ -27,7 +27,7 @@
 - [x] MCP の記事一覧で取得対象、入力順不問の日時範囲、最大 5 個の検索語を AND 条件として任意に組み合わせられる
 - [x] MCP の無条件検索が `conf/mcp.toml` の既定件数を新しい順に返す
 - [x] MCP の検索が日時と記事 ID のカーソル方式で動作し、本文詳細を DB から分割取得できる
-- [x] MCP がステートレス JSON で動作し、Origin、メソッド、本文サイズ、Content-Type を検証できる
+- [x] MCP がステートレス JSON で動作し、Origin を検証せず、メソッド、本文サイズ、Content-Type を検証できる
 - [x] 単体テスト、`go vet`、ビルドが成功する
 - [x] `build.ps1` で実設定を含まない Windows x64 と Linux x64 の配布一式を `dist/Windows` と `dist/linux` へ再生成できる
 - [x] ソース変更後に `test.ps1` と `build.ps1` を順番に実行する手順をプロジェクト指示へ保存する
@@ -65,7 +65,7 @@
 25. 未削除の `news_sources` は有効状態にかかわらず `list_sources` へ含め、ID、設定名、種類、有効状態を返す。
 26. 検索順に対応する式インデックスは既存マイグレーションを書き換えず、`003_mcp_article_order.sql` で追加する。
 27. 記事詳細は本文を既定 8,000 文字、最大 16,000 文字ずつ SQL の `SUBSTRING` で取得し、本文全体をアプリケーションへ読み込まない。
-28. MCP は `Origin` ヘッダーが存在する要求を拒否し、`application/json`、`POST`、1 MiB の本文上限を検証する。
+28. MCP は `Origin` ヘッダーを検証せず、付与の有無や値にかかわらず受け付ける。`application/json`、`POST`、1 MiB の本文上限は引き続き検証する。
 29. MCP の出力には raw payload、PostgreSQL 接続情報、SQL、内部エラー詳細を含めない。
 30. MCP の DB 問い合わせ期限は 60 秒、HTTP 応答期限は 75 秒とし、リモート DB の遅延を許容しながら無期限の占有を防ぐ。
 31. 記事一覧 `/admin/articles` と記事詳細 `/admin/articles/:id` は記事データを SSR せず、ローカルの `/lib/axios/axios.min.js` と `/static/articles.js` から同一オリジン JSON API を呼び出して描画する。

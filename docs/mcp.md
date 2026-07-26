@@ -20,7 +20,7 @@ MCP は既存の HTTP サーバーへ同居させ、管理画面と同じ待受�
 - tools は `list_sources`、`search_articles`、`get_article` の 3 個だけを公開する。
 - リクエストの `Content-Type` は `application/json` を必須とする。
 - リクエスト本文は 1 MiB を上限とする。
-- `Origin` ヘッダーが存在するリクエストは値にかかわらず拒否する。
+- `Origin` ヘッダーは検証せず、付与の有無や値にかかわらず受け付ける。
 - `GET`、`PUT`、`PATCH`、`DELETE` など `POST` 以外のメソッドは拒否する。
 - 1 回の PostgreSQL 問い合わせは最大 60 秒で中止し、停止した DB が接続と処理枠を占有し続けることを防ぐ。
 - HTTP 応答期限は 75 秒とし、DB 問い合わせ完了後の応答処理時間を確保する。
@@ -173,15 +173,15 @@ PostgreSQL の `SUBSTRING` で `body_offset` から `body_limit + 1` 文字だ�
 通常の `go run .` を既存の Go 1.24.2 で維持するため、公式 MCP Go SDK は `v1.3.1` に固定する。
 同 SDK が利用する JSON 実装は、Unicode NUL を含むキー処理が修正された `github.com/segmentio/encoding v0.5.4` を明示的に選択する。
 
-SDK の当該版だけでは Streamable HTTP の Origin と Content-Type を検証しないため、MCP ハンドラーの前段で次を独自に強制する。
+SDK の当該版だけでは Streamable HTTP の Content-Type を検証しないため、MCP ハンドラーの前段で次を独自に強制する。
 
-- `Origin` ヘッダーが存在する要求を拒否する
 - `Content-Type: application/json` 以外を拒否する
 - 圧縮要求を拒否する
 - 本文を 1 MiB までに制限する
 - `POST` 以外を拒否する
 
 この境界処理は SDK の更新後も二重防御として維持する。
+`Origin` ヘッダーは境界処理の判定に使用せず、要求をそのまま MCP ハンドラーへ渡す。
 
 ## クライアント設定
 
@@ -192,4 +192,4 @@ http://localhost:8080/mcp
 ```
 
 別端末から接続する場合は `localhost` を NewsStore 稼働端末の IP アドレスへ置き換える。
-ブラウザー由来のリクエストは `Origin` ヘッダーを伴うため利用できず、MCP の HTTP クライアントから接続する。
+`Origin` ヘッダー付きのクライアントからも接続できる。

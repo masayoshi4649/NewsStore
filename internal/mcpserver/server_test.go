@@ -625,7 +625,7 @@ func TestServerMasksRepositoryErrors(t *testing.T) {
 TestServerProtectsHTTPEndpoint は、MCP HTTP 境界の制限を検証します。
 
 機能:
-  - Origin付き要求、POST以外、JSON以外、圧縮要求、過大本文を拒否する
+  - POST以外、JSON以外、圧縮要求、過大本文を拒否する
   - 各拒否応答に想定したHTTP状態コードを返す
 
 引数:
@@ -642,19 +642,10 @@ func TestServerProtectsHTTPEndpoint(t *testing.T) {
 		method      string
 		body        string
 		contentType string
-		origin      string
 		encoding    string
 		wantStatus  int
 		wantAllow   string
 	}{
-		{
-			name:        "Origin付き",
-			method:      http.MethodPost,
-			body:        "{}",
-			contentType: "application/json",
-			origin:      "https://example.com",
-			wantStatus:  http.StatusForbidden,
-		},
 		{
 			name:       "GET",
 			method:     http.MethodGet,
@@ -696,9 +687,6 @@ func TestServerProtectsHTTPEndpoint(t *testing.T) {
 			if testCase.contentType != "" {
 				request.Header.Set("Content-Type", testCase.contentType)
 			}
-			if testCase.origin != "" {
-				request.Header.Set("Origin", testCase.origin)
-			}
 			if testCase.encoding != "" {
 				request.Header.Set("Content-Encoding", testCase.encoding)
 			}
@@ -734,7 +722,8 @@ func TestServerProtectsHTTPEndpoint(t *testing.T) {
 TestServerDoesNotIssueSessionID は、ステートレスな初期化応答を検証します。
 
 機能:
-  - MCP initialize要求をHTTPで直接送信する
+  - Originヘッダー付きのMCP initialize要求をHTTPで直接送信する
+  - Originヘッダーの有無や値を検証せず、正常に処理する
   - 正常なJSON応答にセッションIDが付与されないことを確認する
 
 引数:
@@ -762,6 +751,7 @@ func TestServerDoesNotIssueSessionID(t *testing.T) {
 	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set("Origin", "https://example.com")
 	recorder := httptest.NewRecorder()
 
 	server.Handler().ServeHTTP(recorder, request)
