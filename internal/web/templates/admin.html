@@ -1,0 +1,528 @@
+{{define "header"}}
+<!doctype html>
+<html lang="ja" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} | NewsStore</title>
+  <link rel="stylesheet" href="/lib/bulma/bulma.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<!--
+[コンポーネント概要]
+.app-navbar は管理画面全体の Bulma navbar です。
+ブランド名と取得対象、記事、取得履歴への主要ナビゲーションを表示します。
+
+.navbar-item.is-active は現在表示中の画面を示します。
+Bulma の状態クラスを使用し、選択中のメニューを視覚的に強調します。
+
+.app-main と .container は各画面の内容幅と余白を統一します。
+.notification は操作成功または処理失敗を通知します。
+
+.box はフォーム、一覧、記事詳細、空状態をまとめる共通サーフェスです。
+.table-container は狭い画面で一覧表の横スクロールを提供します。
+
+.button.is-link は主要操作、.button.is-light は補助操作、
+.button.is-danger.is-light は論理削除操作を示します。
+
+.tag は取得元や状態を簡潔に表示します。
+.status-running、.status-succeeded、.status-partial、.status-failed は取得結果の状態色を補完します。
+
+.article-body は保存済みのプレーンテキスト本文を改行保持して表示します。
+-->
+<nav class="navbar app-navbar" role="navigation" aria-label="主要メニュー">
+  <div class="container is-fluid">
+    <div class="navbar-brand">
+      <a class="navbar-item app-brand" href="/admin/sources">
+        <span class="brand-mark" aria-hidden="true">N</span>
+        <span>
+          <strong class="has-text-white">NewsStore</strong>
+          <small class="brand-caption">記事収集管理</small>
+        </span>
+      </a>
+    </div>
+    <div class="navbar-menu is-active">
+      <div class="navbar-start">
+        <a class="navbar-item {{if eq .Active "sources"}}is-active{{end}}" href="/admin/sources">取得対象</a>
+        <a class="navbar-item {{if eq .Active "articles"}}is-active{{end}}" href="/admin/articles">記事</a>
+        <a class="navbar-item {{if eq .Active "runs"}}is-active{{end}}" href="/admin/runs">取得履歴</a>
+      </div>
+    </div>
+  </div>
+</nav>
+<main class="section app-main">
+  <div class="container is-fluid">
+    {{if .Message}}
+    <div class="notification is-success is-light" role="status">{{.Message}}</div>
+    {{end}}
+    {{if .Error}}
+    <div class="notification is-danger is-light app-error" role="alert">{{.Error}}</div>
+    {{end}}
+{{end}}
+
+{{define "footer"}}
+  </div>
+</main>
+<footer class="footer app-footer">
+  <div class="content has-text-centered">
+    <p>NewsStore 管理画面</p>
+  </div>
+</footer>
+</body>
+</html>
+{{end}}
+
+{{define "sources.html"}}
+{{template "header" .Base}}
+<div class="level page-heading">
+  <div class="level-left">
+    <div>
+      <p class="eyebrow">収集設定</p>
+      <h1 class="title is-2">取得対象</h1>
+      <p class="subtitle is-6 has-text-grey">RSS / Atom と Reuters の取得先、間隔、最大件数を管理します。</p>
+    </div>
+  </div>
+  <div class="level-right">
+    <a class="button is-link" href="/admin/sources/new">取得対象を追加</a>
+  </div>
+</div>
+
+{{if .Sources}}
+<div class="box table-card">
+  <div class="table-container">
+    <table class="table is-fullwidth is-hoverable">
+      <thead>
+        <tr>
+          <th>名前</th>
+          <th>種別</th>
+          <th>状態</th>
+          <th>取得間隔</th>
+          <th>最終取得</th>
+          <th>次回予定</th>
+          <th>直近結果</th>
+          <th class="actions-column">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Sources}}
+        <tr>
+          <td>
+            <strong>{{.Name}}</strong>
+            <span class="subtext">{{shorten .Description 48}}</span>
+          </td>
+          <td><span class="tag is-link is-light">{{kindLabel .Kind}}</span></td>
+          <td>
+            {{if .Enabled}}
+            <span class="tag is-success is-light">有効</span>
+            {{else}}
+            <span class="tag is-light">無効</span>
+            {{end}}
+          </td>
+          <td>{{.FetchIntervalMinutes}} 分 / 最大 {{.MaxItems}} 件</td>
+          <td>{{formatTime .LastFetchedAt}}</td>
+          <td>{{formatTime .NextFetchAt}}</td>
+          <td>
+            {{if .LastError}}
+            <span class="tag is-warning is-light">警告あり</span>
+            <span class="subtext">{{shorten .LastError 60}}</span>
+            {{else}}
+            <span class="tag is-success is-light">正常</span>
+            {{end}}
+          </td>
+          <td>
+            <div class="action-buttons">
+              <form method="post" action="/admin/sources/{{.ID}}/fetch">
+                <input type="hidden" name="_csrf" value="{{$.Base.CSRFToken}}">
+                <button class="button is-link is-small" type="submit">今すぐ取得</button>
+              </form>
+              <a class="button is-light is-small" href="/admin/sources/{{.ID}}/edit">編集</a>
+              <form method="post" action="/admin/sources/{{.ID}}/delete">
+                <input type="hidden" name="_csrf" value="{{$.Base.CSRFToken}}">
+                <button class="button is-danger is-light is-small" type="submit">削除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{else}}
+<section class="box empty-state">
+  <h2 class="title is-4">取得対象がありません</h2>
+  <p class="has-text-grey mb-5">最初の RSS フィード、または Reuters セクションを追加してください。</p>
+  <a class="button is-link" href="/admin/sources/new">取得対象を追加</a>
+</section>
+{{end}}
+{{template "footer" .Base}}
+{{end}}
+
+{{define "source_form.html"}}
+{{template "header" .Base}}
+<div class="level page-heading">
+  <div class="level-left">
+    <div>
+      <p class="eyebrow">収集設定</p>
+      <h1 class="title is-2">{{if .IsEdit}}取得対象を編集{{else}}取得対象を追加{{end}}</h1>
+      <p class="subtitle is-6 has-text-grey">共通設定とコネクタ固有設定を入力します。</p>
+    </div>
+  </div>
+  <div class="level-right">
+    <a class="button is-light" href="/admin/sources">一覧へ戻る</a>
+  </div>
+</div>
+
+<!--
+#source-form は取得対象を作成または更新する Bulma box フォームです。
+#source-kind は RSS と Reuters のコネクタ種別を指定します。
+#endpoint-url は RSS / Atom のフィード URL だけを指定します。
+#reuters-target は定義済みの Reuters 取得内容から選択します。
+
+[data-connector-fields] は #source-kind と一致するコネクタ固有設定だけを表示します。
+非表示側の入力要素は disabled にし、別コネクタの値が送信されることを防ぎます。
+
+.reuters-fields は固定 URL を使用する Reuters の取得内容選択をまとめます。
+.rss-fields は RSS URL とリンク先本文取得設定をまとめます。
+-->
+<form id="source-form" class="box form-box" method="post"
+  action="{{if .IsEdit}}/admin/sources/{{.Form.ID}}{{else}}/admin/sources{{end}}">
+  <input type="hidden" name="_csrf" value="{{.Base.CSRFToken}}">
+
+  <div class="columns is-multiline">
+    <div class="column is-full">
+      <div class="field">
+        <label class="label" for="source-name">名前 <span class="has-text-danger" aria-hidden="true">*</span></label>
+        <div class="control">
+          <input id="source-name" class="input" name="name" type="text" required maxlength="200"
+            value="{{.Form.Name}}" placeholder="例）経済ニュース">
+        </div>
+      </div>
+    </div>
+
+    <div class="column is-half">
+      <div class="field">
+        <label class="label" for="source-kind">コネクタ <span class="has-text-danger" aria-hidden="true">*</span></label>
+        <div class="control">
+          <div class="select is-fullwidth">
+            <select id="source-kind" name="kind" required>
+              <option value="rss" {{if eq .Form.Kind "rss"}}selected{{end}}>RSS / Atom</option>
+              <option value="reuters" {{if eq .Form.Kind "reuters"}}selected{{end}}>Reuters</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="column is-half">
+      <div class="field">
+        <label class="label" for="source-enabled">状態</label>
+        <div class="control checkbox-control">
+          <label class="checkbox">
+            <input id="source-enabled" name="enabled" type="checkbox" {{if .Form.Enabled}}checked{{end}}>
+            定期取得を有効にする
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="column is-half">
+      <div class="field">
+        <label class="label" for="fetch-interval">取得間隔（分）</label>
+        <div class="control">
+          <input id="fetch-interval" class="input" name="fetch_interval_minutes" type="number"
+            min="1" max="10080" required value="{{.Form.FetchIntervalMinutes}}">
+        </div>
+      </div>
+    </div>
+
+    <div class="column is-half">
+      <div class="field">
+        <label class="label" for="max-items">最大取得件数</label>
+        <div class="control">
+          <input id="max-items" class="input" name="max_items" type="number"
+            min="1" max="50" required value="{{.Form.MaxItems}}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr>
+
+  <section class="connector-fields rss-fields" data-connector-fields="rss"
+    {{if ne .Form.Kind "rss"}}hidden{{end}}>
+    <h2 class="title is-5">RSS / Atom 設定</h2>
+    <div class="field">
+      <label class="label" for="endpoint-url">フィード URL <span class="has-text-danger" aria-hidden="true">*</span></label>
+      <div class="control">
+        <input id="endpoint-url" class="input" name="endpoint_url" type="url" required
+          value="{{.Form.EndpointURL}}" placeholder="https://example.com/feed.xml"
+          {{if ne .Form.Kind "rss"}}disabled{{end}}>
+      </div>
+      <p class="help">URL 内のユーザー名・パスワードは使用できません。</p>
+    </div>
+    <div class="field">
+      <div class="control">
+        <label class="checkbox">
+          <input name="fetch_full_article" type="checkbox" {{if .Form.FetchFullArticle}}checked{{end}}
+            {{if ne .Form.Kind "rss"}}disabled{{end}}>
+          リンク先ページから本文を抽出する
+        </label>
+      </div>
+      <p class="help">無効時、または抽出失敗時はフィード内の本文・説明を使用します。</p>
+    </div>
+  </section>
+
+  <section class="connector-fields reuters-fields" data-connector-fields="reuters"
+    {{if ne .Form.Kind "reuters"}}hidden{{end}}>
+    <h2 class="title is-5">Reuters 設定</h2>
+    <div class="field">
+      <label class="label" for="reuters-target">取得内容 <span class="has-text-danger" aria-hidden="true">*</span></label>
+      <div class="control">
+        <div class="select is-fullwidth">
+          <select id="reuters-target" name="reuters_target" required
+            {{if ne .Form.Kind "reuters"}}disabled{{end}}>
+            {{range .ReutersTargets}}
+            <option value="{{.ID}}" {{if eq $.Form.ReutersTarget .ID}}selected{{end}}>
+              {{.Label}}の記事（見出し・本文）
+            </option>
+            {{end}}
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="notification is-dark reuters-endpoint-note">
+      <p><strong>固定取得先</strong>: <code>https://jp.reuters.com</code></p>
+      <p class="help">一覧APIで記事を選び、詳細APIから見出しと本文を取得します。URLや内部API設定の入力は不要です。</p>
+    </div>
+    <p class="help">Reuters 公開 Web の内部 API 仕様に依存するため、仕様変更時は取得履歴のエラーを確認してください。</p>
+  </section>
+
+  <div class="field is-grouped mt-6">
+    <div class="control">
+      <button class="button is-link" type="submit">{{if .IsEdit}}更新する{{else}}追加する{{end}}</button>
+    </div>
+    <div class="control">
+      <a class="button is-light" href="/admin/sources">キャンセル</a>
+    </div>
+  </div>
+</form>
+<script src="/static/source-form.js" defer></script>
+{{template "footer" .Base}}
+{{end}}
+
+{{define "articles.html"}}
+{{template "header" .Base}}
+<div class="level page-heading">
+  <div class="level-left">
+    <div>
+      <p class="eyebrow">保存データ</p>
+      <h1 class="title is-2">記事</h1>
+      <p class="subtitle is-6 has-text-grey">見出しと本文を検索し、保存されたリビジョンを確認します。</p>
+    </div>
+  </div>
+  <div class="level-right">
+    <span class="tag is-link is-light is-medium">{{.Page.Total}} 件</span>
+  </div>
+</div>
+
+<!--
+#article-filter は記事一覧の取得対象とキーワードを絞り込む Bulma box フォームです。
+#article-query は見出しと本文の部分一致検索語を入力します。
+-->
+<form id="article-filter" class="box filter-box" method="get" action="/admin/articles">
+  <div class="columns is-vcentered">
+    <div class="column is-one-third">
+      <div class="field">
+        <label class="label" for="article-source">取得対象</label>
+        <div class="control">
+          <div class="select is-fullwidth">
+            <select id="article-source" name="source_id">
+              <option value="">すべて</option>
+              {{range .Sources}}
+              <option value="{{.ID}}" {{if eq $.SourceID .ID}}selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="field">
+        <label class="label" for="article-query">キーワード</label>
+        <div class="control">
+          <input id="article-query" class="input" name="q" type="search"
+            value="{{.Keyword}}" placeholder="見出しまたは本文">
+        </div>
+      </div>
+    </div>
+    <div class="column is-narrow">
+      <div class="field filter-submit">
+        <div class="control">
+          <button class="button is-link" type="submit">検索</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+
+{{if .Page.Items}}
+<div class="box table-card">
+  <div class="table-container">
+    <table class="table is-fullwidth is-hoverable">
+      <thead>
+        <tr>
+          <th>公開日時</th>
+          <th>見出し</th>
+          <th>取得対象</th>
+          <th>取得元</th>
+          <th>取得日時</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Page.Items}}
+        <tr>
+          <td>{{formatTime .PublishedAt}}</td>
+          <td>
+            <a class="headline-link" href="/admin/articles/{{.ID}}">{{.Headline}}</a>
+            <span class="subtext">{{shorten .BodyText 100}}</span>
+          </td>
+          <td>{{.SourceName}}</td>
+          <td><span class="tag is-link is-light">{{.Provider}}</span></td>
+          <td>{{formatTime .FetchedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+<nav class="pagination is-centered mt-5" aria-label="記事ページ">
+  {{if .PreviousURL}}<a class="pagination-previous" href="{{.PreviousURL}}">前へ</a>{{end}}
+  {{if .NextURL}}<a class="pagination-next" href="{{.NextURL}}">次へ</a>{{end}}
+  <ul class="pagination-list">
+    <li><span class="pagination-link is-current" aria-current="page">{{.CurrentPage}}</span></li>
+  </ul>
+</nav>
+{{else}}
+<section class="box empty-state">
+  <h2 class="title is-4">該当する記事がありません</h2>
+  <p class="has-text-grey">取得対象を手動実行するか、検索条件を変更してください。</p>
+</section>
+{{end}}
+{{template "footer" .Base}}
+{{end}}
+
+{{define "article.html"}}
+{{template "header" .Base}}
+<div class="level page-heading">
+  <div class="level-left article-heading">
+    <div>
+      <p class="eyebrow">{{.Article.SourceName}} / {{.Article.Provider}}</p>
+      <h1 class="title is-2">{{.Article.Headline}}</h1>
+      <p class="subtitle is-6 has-text-grey">
+        公開 {{formatTime .Article.PublishedAt}} ・ 取得 {{formatTime .Article.FetchedAt}}
+      </p>
+    </div>
+  </div>
+  <div class="level-right">
+    <a class="button is-light" href="/admin/articles">記事一覧へ戻る</a>
+  </div>
+</div>
+
+<article class="box article-detail">
+  <dl class="columns is-multiline metadata-list">
+    <div class="column is-half">
+      <dt>外部 ID</dt>
+      <dd>{{.Article.ExternalID}}</dd>
+    </div>
+    <div class="column is-half">
+      <dt>リビジョン</dt>
+      <dd>{{.Article.RevisionID}}</dd>
+    </div>
+    <div class="column is-half">
+      <dt>更新日時</dt>
+      <dd>{{formatTime .Article.UpdatedAt}}</dd>
+    </div>
+    {{if .Article.CanonicalURL}}
+    <div class="column is-half">
+      <dt>元記事</dt>
+      <dd><a href="{{.Article.CanonicalURL}}" rel="noreferrer" target="_blank">{{.Article.CanonicalURL}}</a></dd>
+    </div>
+    {{end}}
+  </dl>
+  <hr>
+  <!-- .article-body は保存済みのプレーンテキスト本文を改行保持して表示します。 -->
+  <pre class="article-body">{{.Article.BodyText}}</pre>
+</article>
+{{template "footer" .Base}}
+{{end}}
+
+{{define "runs.html"}}
+{{template "header" .Base}}
+<div class="level page-heading">
+  <div class="level-left">
+    <div>
+      <p class="eyebrow">監査ログ</p>
+      <h1 class="title is-2">取得履歴</h1>
+      <p class="subtitle is-6 has-text-grey">定期取得と手動取得の結果、保存件数、警告を確認します。</p>
+    </div>
+  </div>
+</div>
+
+{{if .Runs}}
+<div class="box table-card">
+  <div class="table-container">
+    <table class="table is-fullwidth is-hoverable">
+      <thead>
+        <tr>
+          <th>開始日時</th>
+          <th>取得対象</th>
+          <th>起動方法</th>
+          <th>状態</th>
+          <th>取得</th>
+          <th>新規</th>
+          <th>重複</th>
+          <th>警告</th>
+          <th>完了日時</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Runs}}
+        <tr>
+          <td>{{formatTime .StartedAt}}</td>
+          <td>{{.SourceName}}</td>
+          <td><span class="tag is-link is-light">{{.TriggerType}}</span></td>
+          <td>
+            <span class="tag status-tag status-{{.Status}}">{{statusLabel .Status}}</span>
+            {{if .ErrorMessage}}<span class="subtext">{{shorten .ErrorMessage 100}}</span>{{end}}
+          </td>
+          <td>{{.FetchedCount}}</td>
+          <td>{{.InsertedCount}}</td>
+          <td>{{.SkippedCount}}</td>
+          <td>{{.WarningCount}}</td>
+          <td>{{formatTime .FinishedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{else}}
+<section class="box empty-state">
+  <h2 class="title is-4">取得履歴がありません</h2>
+  <p class="has-text-grey">取得対象の「今すぐ取得」を実行すると、ここに結果が表示されます。</p>
+</section>
+{{end}}
+{{template "footer" .Base}}
+{{end}}
+
+{{define "error.html"}}
+{{template "header" .Base}}
+<section class="box empty-state">
+  <h1 class="title is-3">{{.Base.Title}}</h1>
+  <p class="has-text-grey mb-5">{{.Base.Error}}</p>
+  <a class="button is-link" href="/admin/sources">取得対象へ戻る</a>
+</section>
+{{template "footer" .Base}}
+{{end}}

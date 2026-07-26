@@ -1,0 +1,113 @@
+# コネクタ設計
+
+## 共通契約
+
+各コネクタは DB へ記事を書き込まず、取得対象を受け取って共通形式の記事一覧を返す。
+共通記事は少なくとも、取得元 ID、リビジョン ID、見出し、本文を持つ。
+見出しまたは本文が空の記事は保存対象にしない。
+
+Reuters コネクタには、保存済みリビジョンの存在だけを問い合わせる抽象インターフェースを注入する。
+一覧レスポンスの `(source_id, id, revision_id)` が保存済みなら詳細 API を省略し、本文を毎回取り直さない。
+実際の保存と実行履歴更新は引き続き取り込みサービスが担当する。
+
+外部 HTTP には、コンテキスト、タイムアウト、User-Agent、レスポンスサイズ上限を適用する。
+一覧取得に失敗した場合は実行全体を失敗とし、一覧中の個別記事だけが失敗した場合は警告として他の記事を継続する。
+管理画面を閉域ネットワークで運用する構成でも、外部取得に対する SSRF 防止は維持する。
+ループバック、プライベート、リンクローカル、共有、文書用、ベンチマーク、予約済み等の特殊用途アドレスは接続直前に拒否する。
+
+管理画面は選択中のコネクタに対応する固有欄だけを表示する。
+非表示側の入力要素は無効化し、RSS 設定へ Reuters 固有値が混入すること、または Reuters 設定へ RSS 固有値が混入することを防ぐ。
+
+## RSS/Atom
+
+本文の優先順位は次のとおり。
+
+1. `fetch_full_article=true` の場合に、リンク先の `article` または `main` 要素から抽出した段落
+2. RSS の `content:encoded` または Atom の `content`
+3. `description`
+
+リンク先取得や抽出が失敗しても、フィード内に本文があれば記事を保存する。
+本文は HTML タグを除去し、段落を改行で連結したプレーンテキストとして保存する。
+Atom の `content type="text"` は HTML として解釈せず、リテラルテキストとして保持する。
+相対記事 URL は、HTTP リダイレクトがあった場合には最終フィード URL を基準に解決する。
+
+## Reuters
+
+### 参照した挙動
+
+[masayoshi4649/GetArticleFromReuters](https://github.com/masayoshi4649/GetArticleFromReuters) の現在の挙動を仕様確認に使った。
+参照元は AGPL-3.0 のためコードはコピーせず、以下の通信・マッピング仕様から独立して実装する。
+
+### 一覧 API
+
+```text
+GET https://jp.reuters.com/pf/api/v3/content/fetch/articles-by-section-alias-or-id-v1
+```
+
+`query` パラメーターへ次の JSON を URL エンコードして渡す。
+
+```json
+{
+  "arc-site": "reuters-japan",
+  "fetch_type": "collection",
+  "offset": 0,
+  "section_id": "/economy/",
+  "size": 5,
+  "website": "reuters-japan"
+}
+```
+
+取得先 URL は `https://jp.reuters.com`、`arc-site` と `website` は `reuters-japan`、`offset` は `0` にコードで固定する。
+`section_id` だけを管理画面の取得内容ホワイトリストから決め、`size` には取得対象の共通設定 `max_items` を使う。
+
+### 詳細 API
+
+```text
+GET https://jp.reuters.com/pf/api/v3/content/fetch/article-by-id-or-url-v1
+```
+
+一覧に `id` がある場合は `id` と固定値の `website=reuters-japan` を渡す。
+`id` がない場合は `website_url` と同じ固定 `website` を渡す。
+一覧 API 名と詳細 API 名は利用者入力や DB 設定から変更せず、コードで固定する。
+
+### 取得内容ホワイトリスト
+
+利用者は管理画面の「取得内容」だけを次のホワイトリストから選択する。
+
+| 画面表示 | 識別子 | `section_id` | 根拠 |
+| --- | --- | --- | --- |
+| 経済 | `economy` | `/economy/` | 参照現行実装で取得を実証済み |
+| 日本 | `japan` | `/world/japan/` | 現行一覧 API で取得確認済み |
+| ワールド | `world` | `/world/` | 同上 |
+| 欧州 | `europe` | `/world/europe/` | 同上 |
+| ウクライナ情勢 | `ukraine` | `/world/ukraine/` | 同上 |
+| ロシア | `russia` | `/world/russia/` | 同上 |
+| 中東・アフリカ | `mideast` | `/world/mideast/` | 同上 |
+| 特集 安全保障問題 | `security` | `/world/security/` | 同上 |
+
+各セクションは一覧 API への実通信で HTTP 200 と記事一覧を確認しているが、内部 API のため継続提供を保証するものではない。
+画面からは識別子を送信し、サーバー側で対応する `section_id` へ変換してホワイトリスト外の値を拒否する。
+旧版で保存された日本セクション `/ja/` は、読み込み時に現行値 `/world/japan/` へ変換する。
+
+### マッピング
+
+| 共通記事 | Reuters 詳細レスポンス |
+| --- | --- |
+| `provider` | `reuters` 固定 |
+| `external_id` | `result.id` |
+| `revision_id` | `result.revision_id` |
+| `canonical_url` | `result.canonical_url` |
+| `published_at` | `result.published_time` |
+| `updated_at` | `result.updated_time` |
+| `headline` | `result.title` |
+| `body_text` | `dateline[]` と `content_elements[type=paragraph].content` |
+
+日時は RFC 3339 Nano として解析する。
+本文は空要素を除き、データライン、段落の順に改行で連結する。
+
+### 変更耐性
+
+この API は Reuters 公開 Web が利用する内部 API であり、安定した公式 REST API 契約ではない。
+本番のベース URL、Web サイト識別子、開始位置、一覧 API、詳細 API はコードで固定する。
+DB の `news_sources.endpoint_url` には固定 URL を保持し、新規作成・更新時の `settings` には選択された `section_id` だけを保存する。
+固定 JSON を用いた単体テストでレスポンス構造の差異を検出する。

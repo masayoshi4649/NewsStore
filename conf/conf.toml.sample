@@ -1,0 +1,25 @@
+# NewsStore 設定サンプル
+#
+# 使用時は内容をconf直下の.tomlファイルへコピーしてください。
+# SYSTEMとPostgreSQLをsystem.toml、postgres.tomlへ分割しても読み込めます。
+# この.sampleファイル自体は読み込みません。
+
+[SYSTEM]
+# 閉域ネットワーク内へ公開するHTTPサーバーの待受ポートです。
+Port = 8080
+
+[postgres]
+host = "127.0.0.1"
+port = 5432
+username = "newsstore"
+password = "change-me"
+dbname = "newsstore"
+
+# TLS対応サーバーではrequireを使用します。
+# TLS非対応かつ通信経路が閉域網内に限定される場合だけdisableへ変更します。
+sslmode = "require"
+
+# advisory lock用接続を含め、ワーカー並列数の2倍以上にします。
+max_open_conns = 25
+max_idle_conns = 5
+auto_migrate = true
