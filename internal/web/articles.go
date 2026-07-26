@@ -87,7 +87,8 @@ type sourceAPIItem struct {
 
 // articleListPage は、API駆動の記事一覧テンプレートへ渡す共通ページ情報です。
 type articleListPage struct {
-	Base basePage
+	Base                basePage
+	DefaultArticleLimit int
 }
 
 // articleDetailPage は、API駆動の記事詳細テンプレートへ渡す共通ページ情報です。
@@ -619,6 +620,7 @@ listArticles は、保存済み記事を検索・ページングして表示し�
 機能:
   - 記事一覧APIをAxiosから利用するための空の画面シェルを表示する
   - 記事データや取得対象はサーバー側で読み込まない
+  - 最大件数欄へ設定済みの既定件数を初期表示する
 
 引数:
   - c *gin.Context: HTTP リクエストとレスポンスのコンテキスト
@@ -628,7 +630,8 @@ listArticles は、保存済み記事を検索・ページングして表示し�
 */
 func (s *Server) listArticles(c *gin.Context) {
 	c.HTML(http.StatusOK, "articles.html", articleListPage{
-		Base: s.newBasePage(c, "記事", "articles"),
+		Base:                s.newBasePage(c, "記事", "articles"),
+		DefaultArticleLimit: s.defaultArticleLimit,
 	})
 }
 

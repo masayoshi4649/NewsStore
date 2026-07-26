@@ -363,10 +363,6 @@ a:focus {
   font-size: 0.85rem;
 }
 
-.article-keyword-panel .help {
-  margin-top: 0.35rem;
-}
-
 .article-grid-container {
   min-height: 6rem;
 }
@@ -417,6 +413,25 @@ a:focus {
   overflow-wrap: anywhere;
   color: var(--newsstore-text-strong);
   font-weight: 600;
+}
+
+.article-grid-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.article-grid-headline {
+  min-width: 0;
+}
+
+.article-grid-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  color: var(--newsstore-muted);
+  font-size: 0.85rem;
 }
 
 .article-grid-container .gridjs-footer {
@@ -477,6 +492,10 @@ a:focus {
   justify-content: center;
   gap: 0.9rem;
   color: var(--newsstore-muted);
+}
+
+.loading-state[hidden] {
+  display: none !important;
 }
 
 .loading-spinner {

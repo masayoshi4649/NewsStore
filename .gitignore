@@ -34,3 +34,6 @@ go.work.sum
 
 # Local Go build caches
 /.cache/
+
+# Generated distribution binaries
+/dist/

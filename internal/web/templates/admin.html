@@ -37,7 +37,7 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
 <nav class="navbar app-navbar" role="navigation" aria-label="主要メニュー">
   <div class="container is-fluid">
     <div class="navbar-brand">
-      <a class="navbar-item app-brand" href="/admin/sources">
+      <a class="navbar-item app-brand" href="/admin/articles">
         <span class="brand-mark" aria-hidden="true">N</span>
         <span>
           <strong class="has-text-white">NewsStore</strong>
@@ -321,24 +321,25 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
 [コンポーネント概要]
 #article-list-page は記事一覧APIを利用する画面全体のルート要素です。
 初期HTMLには記事データを含めず、Axiosで /api/articles を呼び出し、
-Grid.jsでヘッドライン一覧とページングを構築します。
+Grid.jsの1列内にヘッドライン、取得対象、更新日時をまとめた一覧とページングを構築します。
 
 #article-filter-toggle は検索条件の表示と非表示を切り替える details 要素です。
 初期状態では閉じ、検索が必要なときだけ summary から開きます。
 
 #article-filter はすべて省略可能な記事検索条件をコンパクトにまとめます。
-#article-source は /api/sources から取得した設定名と news_sources.id を選択肢として表示します。
+#article-source は /api/sources から取得した設定名をラベルへ表示し、news_sources.id を値として保持します。
 #article-date-from と #article-date-to は「～」で結んだ同一行の日時範囲入力です。
 入力順にかかわらず、早い日時から遅い日時までを検索します。
 #article-keyword-1 から #article-keyword-5 はAND検索する語を1件ずつ入力します。
 各入力はAPI許容境界に合わせて200文字に制限します。
-#article-limit はAPIから受け取る最大件数を指定し、空欄時はサーバー設定値を使用します。
+#article-limit はAPIから受け取る最大件数を指定し、サーバー設定値を初期表示します。
 
 #article-search は入力済み条件で先頭から検索します。
 #article-clear は全条件を消去し、無条件の最新記事検索を実行します。
 #article-error はAPI呼び出しに失敗した場合のエラーを通知します。
 
-#article-grid はAPI結果からGrid.jsがヘッドライン一覧を生成する領域です。
+#article-grid はAPI結果からGrid.jsが記事ごとの情報を1列にまとめた一覧を生成する領域です。
+更新日時がない記事は投稿日時を表示します。
 ページ切り替えはGrid.jsのページング機能で行います。
 -->
 <section id="article-list-page" aria-labelledby="article-list-title">
@@ -347,7 +348,7 @@ Grid.jsでヘッドライン一覧とページングを構築します。
       <div>
         <p class="eyebrow">保存データ</p>
         <h1 id="article-list-title" class="title is-2">記事</h1>
-        <p class="subtitle is-6 has-text-grey">保存した記事のヘッドラインを確認できます。</p>
+        <p class="subtitle is-6 has-text-grey">保存した記事のヘッドライン、取得対象、更新日時を確認できます。</p>
       </div>
     </div>
   </div>
@@ -389,7 +390,7 @@ Grid.jsでヘッドライン一覧とページングを構築します。
               <label class="label" for="article-limit">最大件数</label>
               <div class="control">
                 <input id="article-limit" class="input" name="limit" type="number"
-                  min="1" max="100" inputmode="numeric" placeholder="既定">
+                  min="1" max="100" inputmode="numeric" value="{{.DefaultArticleLimit}}">
               </div>
             </div>
             <div class="article-filter-actions">
@@ -405,30 +406,29 @@ Grid.jsでヘッドライン一覧とページングを構築します。
             <div class="control">
               <label class="is-sr-only" for="article-keyword-1">検索語1</label>
               <input id="article-keyword-1" class="input" name="keywords" type="search"
-                maxlength="200" placeholder="検索語 1" aria-describedby="article-keyword-help article-filter-error">
+                maxlength="200" placeholder="検索語 1" aria-describedby="article-filter-error">
             </div>
             <div class="control">
               <label class="is-sr-only" for="article-keyword-2">検索語2</label>
               <input id="article-keyword-2" class="input" name="keywords" type="search"
-                maxlength="200" placeholder="検索語 2" aria-describedby="article-keyword-help article-filter-error">
+                maxlength="200" placeholder="検索語 2" aria-describedby="article-filter-error">
             </div>
             <div class="control">
               <label class="is-sr-only" for="article-keyword-3">検索語3</label>
               <input id="article-keyword-3" class="input" name="keywords" type="search"
-                maxlength="200" placeholder="検索語 3" aria-describedby="article-keyword-help article-filter-error">
+                maxlength="200" placeholder="検索語 3" aria-describedby="article-filter-error">
             </div>
             <div class="control">
               <label class="is-sr-only" for="article-keyword-4">検索語4</label>
               <input id="article-keyword-4" class="input" name="keywords" type="search"
-                maxlength="200" placeholder="検索語 4" aria-describedby="article-keyword-help article-filter-error">
+                maxlength="200" placeholder="検索語 4" aria-describedby="article-filter-error">
             </div>
             <div class="control">
               <label class="is-sr-only" for="article-keyword-5">検索語5</label>
               <input id="article-keyword-5" class="input" name="keywords" type="search"
-                maxlength="200" placeholder="検索語 5" aria-describedby="article-keyword-help article-filter-error">
+                maxlength="200" placeholder="検索語 5" aria-describedby="article-filter-error">
             </div>
           </div>
-          <p id="article-keyword-help" class="help">入力したすべての語を含む記事が対象です。</p>
         </fieldset>
       </div>
       <p id="article-filter-error" class="help has-text-danger" role="alert" hidden></p>

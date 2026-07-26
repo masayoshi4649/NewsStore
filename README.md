@@ -101,7 +101,7 @@ go run .
 ```
 
 同じ端末から確認する場合は、ブラウザーで `http://localhost:8080/` を開きます。
-トップ URL `/` は取得対象一覧 `/admin/sources` へリダイレクトされます。
+トップ URL `/` とロゴは記事一覧 `/admin/articles` へ遷移します。
 閉域ネットワーク内の別端末からは、`localhost` を NewsStore 稼働端末の IP アドレスへ置き換えてください。
 有効な取得対象は作成後すぐに定期取得キューへ入ります。
 
@@ -119,11 +119,12 @@ go run .
 
 通常画面の検索条件、実効日時の新しい順、日時と記事 ID によるカーソル、本文分割方法は MCP と共通です。
 条件と最大件数はすべて省略でき、件数を省略した場合は `conf/mcp.toml` の `DefaultArticleLimit` を使います。
+検索画面の最大件数欄には、この `DefaultArticleLimit` の実際の設定値を初期表示します。
 検索パネルは既定で閉じ、日時範囲を横並びの `～` で指定します。
 両方の日時を指定した場合は、どちらへ早い日時を入力しても、早い方を下限、遅い方を上限として検索します。
 片方だけを指定した場合は、左側を下限、右側を上限として扱います。
 最大 5 個の検索語は個別の入力欄へ指定します。
-一覧はヘッドラインだけを表示し、API が返した最大件数内を Grid.js で 1 ページ 10 件にローカルページングします。
+一覧は本文を表示せず、1列内にヘッドライン、取得対象、更新日時をまとめて表示します。更新日時がない場合は投稿日時を使用し、API が返した最大件数内を Grid.js で 1 ページ 10 件にローカルページングします。
 API の本文先頭 500 文字、keyset cursor、続きの有無は維持しますが、通常画面の一覧には本文抜粋、件数、続き文言、追加取得ボタンを表示しません。
 詳細の長い本文は「続きを読む」で続きだけを取得します。
 API は `COUNT` と `OFFSET` を使わず、DB 問い合わせ期限を 60 秒とします。
@@ -219,17 +220,51 @@ GET /healthz
 
 DB 接続を含めて正常な場合は HTTP 200 を返します。
 
-## テスト
+## テストと配布ビルド
+
+ソースコードを変更した後は、プロジェクトルートでテストに続けて配布ビルドを必ず実行します。
 
 ```powershell
-./test.ps1
+.\test.ps1
+.\build.ps1
 ```
 
-または個別に実行します。
+`build.ps1` は `dist` フォルダ全体を作り直し、Windows と Linux x64 を独立して持ち出せる次の構成を生成します。
+
+| 対象 | 実行ファイル |
+| --- | --- |
+| Windows x64 (`windows/amd64`) | `dist/Windows/newsstore.exe` |
+| Linux x64 (`linux/amd64`) | `dist/linux/newsstore` |
+
+各フォルダには、実行ファイルに加えて設定サンプル `conf/conf.toml.sample`、配布用 `README.md`、`LICENSE` を配置します。
+実際の `system.toml`、`mcp.toml`、`postgres.toml` は認証情報を含み得るため、`dist` へコピーしません。
+
+```text
+dist/
+├── Windows/
+│   ├── newsstore.exe
+│   ├── conf/
+│   │   └── conf.toml.sample
+│   ├── README.md
+│   └── LICENSE
+└── linux/
+    ├── newsstore
+    ├── conf/
+    │   └── conf.toml.sample
+    ├── README.md
+    └── LICENSE
+```
+
+配布ビルドは `CGO_ENABLED=0`、`-trimpath`、`-ldflags "-s -w"` を使用します。両方のビルドと必要ファイルの準備に成功した後でだけ、既存の `dist` と入れ替えます。
+`dist/conf` ではなく各 OS フォルダ内の `conf` を使用するため、配布先では対象 OS のフォルダへ移動してから実行してください。
+初回起動前に `conf/conf.toml.sample` を `conf/conf.toml` へコピーし、接続先に合わせて編集します。
+
+テストを個別に実行する場合は次のコマンドを使用します。
 
 ```powershell
 go test ./...
 go vet ./...
+go mod tidy -diff
 go build .
 ```
 

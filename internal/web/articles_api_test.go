@@ -155,6 +155,15 @@ func TestListArticlesAPIAppliesAllConditions(t *testing.T) {
 	if response.Articles[0].BodyExcerpt != "企業の本文" {
 		t.Errorf("body_excerpt = %q", response.Articles[0].BodyExcerpt)
 	}
+	if response.Articles[0].SourceName != "Reuters経済" {
+		t.Errorf("source_name = %q", response.Articles[0].SourceName)
+	}
+	if response.Articles[0].PublishedAt != effectiveAt.Format(time.RFC3339Nano) {
+		t.Errorf("published_at = %q", response.Articles[0].PublishedAt)
+	}
+	if response.Articles[0].UpdatedAt != effectiveAt.Format(time.RFC3339Nano) {
+		t.Errorf("updated_at = %q", response.Articles[0].UpdatedAt)
+	}
 	if !response.HasMore || response.NextCursor == "" {
 		t.Errorf("ページ情報 = has_more:%v next_cursor:%q", response.HasMore, response.NextCursor)
 	}
@@ -492,7 +501,7 @@ TestArticlePagesRenderWithoutDatabaseAccess は、記事画面がAPI駆動のシ
 func TestArticlePagesRenderWithoutDatabaseAccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	server, err := New(nil, nil, nil, 20)
+	server, err := New(nil, nil, nil, 37)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -506,6 +515,7 @@ func TestArticlePagesRenderWithoutDatabaseAccess(t *testing.T) {
 			url:        "/admin/articles",
 			statusCode: http.StatusOK,
 			wantValues: []string{
+				`class="navbar-item app-brand" href="/admin/articles"`,
 				`<details id="article-filter-toggle"`,
 				`class="article-date-separator" aria-hidden="true">～</span>`,
 				`id="article-keyword-1"`,
@@ -514,6 +524,8 @@ func TestArticlePagesRenderWithoutDatabaseAccess(t *testing.T) {
 				`id="article-keyword-4"`,
 				`id="article-keyword-5"`,
 				`maxlength="200"`,
+				`id="article-limit" class="input" name="limit" type="number"`,
+				`min="1" max="100" inputmode="numeric" value="37"`,
 				`id="article-grid"`,
 				`href="/lib/gridjs/theme/mermaid.min.css"`,
 				`src="/lib/axios/axios.min.js"`,
@@ -530,6 +542,9 @@ func TestArticlePagesRenderWithoutDatabaseAccess(t *testing.T) {
 				`続きがあります`,
 				`下限`,
 				`上限`,
+				`placeholder="既定"`,
+				`id="article-keyword-help"`,
+				`入力したすべての語を含む記事が対象です。`,
 				`<details id="article-filter-toggle" class="article-filter-disclosure" open`,
 			},
 		},

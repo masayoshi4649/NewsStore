@@ -151,7 +151,7 @@ buildEngine は、管理画面のミドルウェアとルートを組み立て�
 
 機能:
   - Gin のリカバリーとセキュリティヘッダーを有効にする
-  - トップページを取得対象一覧へ転送する
+  - トップページと管理画面ルートを記事一覧へ転送する
   - 公開ヘルスチェック、補助CSS・JavaScript、ローカルWebライブラリを登録する
   - 管理画面の状態変更へCSRF保護を適用する
 
@@ -167,7 +167,7 @@ func (s *Server) buildEngine() *gin.Engine {
 	engine.SetHTMLTemplate(s.template)
 
 	engine.GET("/", func(c *gin.Context) {
-		c.Redirect(http.StatusSeeOther, "/admin/sources")
+		c.Redirect(http.StatusSeeOther, "/admin/articles")
 	})
 	engine.GET("/healthz", s.health)
 	engine.GET("/static/app.css", s.css)
@@ -184,7 +184,7 @@ func (s *Server) buildEngine() *gin.Engine {
 	admin := engine.Group("/admin")
 	admin.Use(s.csrf())
 	admin.GET("", func(c *gin.Context) {
-		c.Redirect(http.StatusSeeOther, "/admin/sources")
+		c.Redirect(http.StatusSeeOther, "/admin/articles")
 	})
 	admin.GET("/sources", s.listSources)
 	admin.GET("/sources/new", s.newSource)

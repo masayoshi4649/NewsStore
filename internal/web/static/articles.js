@@ -333,10 +333,66 @@ function createArticleHeadlineCell(article) {
 // ----------------------------------------
 
 /**
+ * 記事一覧へ表示する更新日時を選択します。
+ *
+ * 機能:
+ *   - 取得元の更新日時が設定されている場合はupdated_atを使用する
+ *   - 更新日時がない場合は投稿日時であるpublished_atへフォールバックする
+ *   - どちらもない場合はformatArticleDateがダッシュ表示できる値を返す
+ *
+ * @param {Record<string, unknown>} article - 記事一覧APIの記事概要。
+ * @returns {unknown} 更新日時、投稿日時、または未設定値。
+ */
+function getArticleListDate(article) {
+  const updatedAt = article.updated_at;
+  if (typeof updatedAt === "string" && updatedAt.trim() !== "") {
+    return updatedAt;
+  }
+  return article.published_at;
+}
+
+// ----------------------------------------
+
+/**
+ * 記事概要1件を1列表示用の安全な要素へ変換します。
+ *
+ * 機能:
+ *   - ヘッドライン、取得対象、更新日時または投稿日時を1つのセルへまとめる
+ *   - API由来の文字列をGrid.jsの仮想DOMのテキスト子として描画する
+ *   - 固定列幅を設けず、画面幅に応じて補足情報を折り返す
+ *
+ * @param {Record<string, unknown>} article - 記事一覧APIの記事概要。
+ * @returns {unknown} Grid.jsが1列へ描画する安全な仮想DOM要素。
+ */
+function createArticleSummaryCell(article) {
+  const sourceName = toDisplayString(article.source_name, "設定名なし");
+  const displayDate = formatArticleDate(getArticleListDate(article));
+
+  return window.gridjs.h(
+    "div",
+    { className: "article-grid-item" },
+    window.gridjs.h(
+      "div",
+      { className: "article-grid-headline" },
+      createArticleHeadlineCell(article),
+    ),
+    window.gridjs.h(
+      "div",
+      { className: "article-grid-meta" },
+      window.gridjs.h("span", {}, `取得対象: ${sourceName}`),
+      window.gridjs.h("span", {}, `更新／投稿日時: ${displayDate}`),
+    ),
+  );
+}
+
+// ----------------------------------------
+
+/**
  * 記事概要配列をGrid.jsで一覧表示します。
  *
  * 機能:
- *   - APIが返した順序を変更せず、見出し1列だけを表示する
+ *   - APIが返した順序を変更せず、見出し、取得対象、更新日時を1列へまとめて表示する
+ *   - 更新日時がない記事は投稿日時を表示する
  *   - 最大取得件数内をGrid.jsのローカルページングで1ページ10件に分ける
  *   - 再検索時は既存Gridのデータだけを更新して検索結果全体を置き換える
  *
@@ -359,8 +415,8 @@ function renderArticleGrid(root, articles) {
   articleListState.grid = new window.gridjs.Grid({
     columns: [
       {
-        name: "ヘッドライン",
-        formatter: (article) => createArticleHeadlineCell(article),
+        name: "記事",
+        formatter: (article) => createArticleSummaryCell(article),
       },
     ],
     data: gridData,
@@ -459,7 +515,7 @@ async function loadArticleList(root) {
  * 取得対象設定APIから一覧検索の選択肢を読み込みます。
  *
  * 機能:
- *   - 設定名とnews_sources.idを選択肢へtextContentで表示する
+ *   - 設定名だけを選択肢のラベルへ表示し、news_sources.idはvalueへ保持する
  *   - 無効な設定は履歴検索できるまま表示上で区別する
  *   - 取得失敗時も「すべて」での記事検索を利用可能に保つ
  *
@@ -492,8 +548,8 @@ async function loadArticleSources(root) {
       }
       const option = document.createElement("option");
       option.value = String(sourceID);
-      const disabledLabel = source.enabled === false ? "・無効" : "";
-      option.textContent = `${toDisplayString(source.name, "設定名なし")}（ID: ${sourceID}${disabledLabel}）`;
+      const sourceName = toDisplayString(source.name, "設定名なし");
+      option.textContent = source.enabled === false ? `${sourceName}（無効）` : sourceName;
       sourceSelect.append(option);
     });
     sourceError.textContent = "";

@@ -86,7 +86,8 @@ func TestTemplatesExecute(t *testing.T) {
 		{
 			name: "articles.html",
 			data: articleListPage{
-				Base: base,
+				Base:                base,
+				DefaultArticleLimit: 20,
 			},
 		},
 		{
@@ -121,7 +122,7 @@ func TestTemplatesExecute(t *testing.T) {
 TestAdminDoesNotRequireAuthentication は、閉域ネットワーク向け管理画面が認証なしで開けることを検証します。
 
 機能:
-  - 管理画面ルートへの未認証リクエストを取得対象一覧へ転送することを確認する
+  - 管理画面ルートへの未認証リクエストを記事一覧へ転送することを確認する
 
 引数:
   - t *testing.T: テスト状態を管理する値
@@ -144,18 +145,18 @@ func TestAdminDoesNotRequireAuthentication(t *testing.T) {
 	if recorder.Code != http.StatusSeeOther {
 		t.Errorf("状態コード = %d, 期待値は %d", recorder.Code, http.StatusSeeOther)
 	}
-	if recorder.Header().Get("Location") != "/admin/sources" {
-		t.Errorf("Location = %q, 期待値は %q", recorder.Header().Get("Location"), "/admin/sources")
+	if recorder.Header().Get("Location") != "/admin/articles" {
+		t.Errorf("Location = %q, 期待値は %q", recorder.Header().Get("Location"), "/admin/articles")
 	}
 }
 
 // ----------------------------------------
 
 /*
-TestRootRedirectsToSources は、トップページから取得対象一覧へ遷移できることを検証します。
+TestRootRedirectsToArticles は、トップページから記事一覧へ遷移できることを検証します。
 
 機能:
-  - ルートURLへのリクエストが管理画面の取得対象一覧へ転送されることを確認する
+  - ルートURLへのリクエストが管理画面の記事一覧へ転送されることを確認する
 
 引数:
   - t *testing.T: テスト状態を管理する値
@@ -163,7 +164,7 @@ TestRootRedirectsToSources は、トップページから取得対象一覧へ�
 返り値:
   - なし
 */
-func TestRootRedirectsToSources(t *testing.T) {
+func TestRootRedirectsToArticles(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	server, err := New(nil, nil, nil)
@@ -178,8 +179,8 @@ func TestRootRedirectsToSources(t *testing.T) {
 	if recorder.Code != http.StatusSeeOther {
 		t.Errorf("状態コード = %d, 期待値は %d", recorder.Code, http.StatusSeeOther)
 	}
-	if recorder.Header().Get("Location") != "/admin/sources" {
-		t.Errorf("Location = %q, 期待値は %q", recorder.Header().Get("Location"), "/admin/sources")
+	if recorder.Header().Get("Location") != "/admin/articles" {
+		t.Errorf("Location = %q, 期待値は %q", recorder.Header().Get("Location"), "/admin/articles")
 	}
 }
 
@@ -268,6 +269,14 @@ func TestSecurityHeadersOnStaticAsset(t *testing.T) {
 		".article-grid-container .gridjs-footer",
 	) {
 		t.Error("記事一覧のGrid.js用ダークテーマを確認できません")
+	}
+	if !strings.Contains(recorder.Body.String(), ".article-grid-item") ||
+		!strings.Contains(recorder.Body.String(), "flex-direction: column") {
+		t.Error("記事一覧を固定幅なしの1列表示にできません")
+	}
+	if !strings.Contains(recorder.Body.String(), ".loading-state[hidden]") ||
+		!strings.Contains(recorder.Body.String(), "display: none !important") {
+		t.Error("記事詳細のローディング表示をhidden属性で非表示にできません")
 	}
 }
 
@@ -398,6 +407,15 @@ func TestArticleJavaScriptAssets(t *testing.T) {
 				"window.axios.get",
 				"new window.gridjs.Grid",
 				"window.gridjs.h",
+				`name: "記事"`,
+				"createArticleSummaryCell(article)",
+				"article-grid-item",
+				"article-grid-meta",
+				"getArticleListDate(article)",
+				"article.updated_at",
+				"article.published_at",
+				"option.value = String(sourceID)",
+				"（無効）",
 				"#article-keyword-1",
 				"#article-keyword-5",
 				"new Date(normalizedFromValue) > new Date(normalizedToValue)",
@@ -419,6 +437,11 @@ func TestArticleJavaScriptAssets(t *testing.T) {
 				"最新の記事を取得しています",
 				"続きがあります",
 				"開始日時は終了日時以前にしてください",
+				"（ID: ${sourceID}${disabledLabel}）",
+				`name: "取得対象"`,
+				`name: "更新日時"`,
+				`width: "16rem"`,
+				`width: "13rem"`,
 			},
 			wantCache: "no-cache",
 		},
