@@ -44,6 +44,7 @@ type Server struct {
 	template            *template.Template
 	staticCSS           []byte
 	staticJS            []byte
+	sourceListJS        []byte
 	articleJS           []byte
 	libraryFS           http.FileSystem
 	engine              *gin.Engine
@@ -101,6 +102,10 @@ func New(
 	if err != nil {
 		return nil, fmt.Errorf("取得対象フォーム JavaScript を読み込めません: %w", err)
 	}
+	sourceListJS, err := assets.ReadFile("static/source-list.js")
+	if err != nil {
+		return nil, fmt.Errorf("取得対象一覧 JavaScript を読み込めません: %w", err)
+	}
 	articleJS, err := assets.ReadFile("static/articles.js")
 	if err != nil {
 		return nil, fmt.Errorf("記事画面 JavaScript を読み込めません: %w", err)
@@ -118,6 +123,7 @@ func New(
 		template:            parsedTemplate,
 		staticCSS:           staticCSS,
 		staticJS:            staticJS,
+		sourceListJS:        sourceListJS,
 		articleJS:           articleJS,
 		libraryFS:           libraryFS,
 		articleAPISlots:     make(chan struct{}, maxConcurrentArticleAPIRequests),
@@ -172,6 +178,7 @@ func (s *Server) buildEngine() *gin.Engine {
 	engine.GET("/healthz", s.health)
 	engine.GET("/static/app.css", s.css)
 	engine.GET("/static/source-form.js", s.sourceFormJavaScript)
+	engine.GET("/static/source-list.js", s.sourceListJavaScript)
 	engine.GET("/static/articles.js", s.articlesJavaScript)
 	engine.StaticFS("/lib", s.libraryFS)
 
@@ -189,6 +196,7 @@ func (s *Server) buildEngine() *gin.Engine {
 	admin.GET("/sources", s.listSources)
 	admin.GET("/sources/new", s.newSource)
 	admin.POST("/sources", s.createSource)
+	admin.POST("/sources/order", s.updateSourceOrder)
 	admin.GET("/sources/:id/edit", s.editSource)
 	admin.POST("/sources/:id", s.updateSource)
 	admin.POST("/sources/:id/delete", s.deleteSource)
@@ -305,6 +313,26 @@ sourceFormJavaScript は、取得元種別で設定欄を切り替えるJavaScri
 func (s *Server) sourceFormJavaScript(c *gin.Context) {
 	c.Header("Cache-Control", "public, max-age=3600")
 	c.Data(http.StatusOK, "text/javascript; charset=utf-8", s.staticJS)
+}
+
+// ----------------------------------------
+
+/*
+sourceListJavaScript は、取得対象一覧の並べ替えJavaScriptを返します。
+
+機能:
+  - Content-Typeとキャッシュ制御を設定して埋め込みJavaScriptを配信する
+  - ポインターとキーボードによる並べ替えおよび表示順保存処理を公開する
+
+引数:
+  - c *gin.Context: HTTPレスポンスを返すGinコンテキスト
+
+返り値:
+  - なし
+*/
+func (s *Server) sourceListJavaScript(c *gin.Context) {
+	c.Header("Cache-Control", "no-cache")
+	c.Data(http.StatusOK, "text/javascript; charset=utf-8", s.sourceListJS)
 }
 
 // ----------------------------------------

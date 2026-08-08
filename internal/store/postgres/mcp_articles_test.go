@@ -253,7 +253,7 @@ func TestSearchArticlesForMCPClampsKeywordsAndLimit(t *testing.T) {
 TestListSourcesForMCPReturnsLightweightSettings は、取得対象の軽量な設定一覧を検証します。
 
 機能:
-  - 論理削除されていない設定だけを名前順で問い合わせる
+  - 論理削除されていない設定だけを保存済み表示順で問い合わせる
   - ID、設定名、コネクタ種別、有効状態を読み込む
 
 引数:
@@ -274,12 +274,12 @@ func TestListSourcesForMCPReturnsLightweightSettings(t *testing.T) {
 
 	mock.ExpectQuery(
 		`(?s)SELECT id, name, kind, enabled.*FROM news_sources.*` +
-			`WHERE deleted_at IS NULL.*ORDER BY LOWER\(name\), id`,
+			`WHERE deleted_at IS NULL.*ORDER BY display_order, id`,
 	).
 		WillReturnRows(
 			sqlmock.NewRows([]string{"id", "name", "kind", "enabled"}).
-				AddRow(int64(3), "国内RSS", "rss", true).
-				AddRow(int64(7), "ロイター経済", "reuters", false),
+				AddRow(int64(7), "ロイター経済", "reuters", false).
+				AddRow(int64(3), "国内RSS", "rss", true),
 		).
 		RowsWillBeClosed()
 
@@ -290,11 +290,11 @@ func TestListSourcesForMCPReturnsLightweightSettings(t *testing.T) {
 	if len(sources) != 2 {
 		t.Fatalf("ListSourcesForMCP() length = %d, 期待値は 2", len(sources))
 	}
-	if sources[0].ID != 3 || sources[0].Name != "国内RSS" {
-		t.Errorf("ListSourcesForMCP() first = %+v, 期待値の ID は 3", sources[0])
+	if sources[0].ID != 7 || sources[0].Name != "ロイター経済" {
+		t.Errorf("ListSourcesForMCP() first = %+v, 期待値の ID は 7", sources[0])
 	}
-	if sources[1].Kind != "reuters" || sources[1].Enabled {
-		t.Errorf("ListSourcesForMCP() second = %+v, 無効な reuters 設定を期待", sources[1])
+	if sources[1].ID != 3 || sources[1].Kind != "rss" || !sources[1].Enabled {
+		t.Errorf("ListSourcesForMCP() second = %+v, 有効な RSS 設定を期待", sources[1])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("SQL期待値が満たされません: %v", err)

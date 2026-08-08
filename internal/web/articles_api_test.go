@@ -428,6 +428,7 @@ TestListSourcesAPIReturnsSettingNamesAndIDs は、取得対象一覧APIを検証
 機能:
   - 設定名とnews_sourcesのIDを含む軽量な取得対象一覧をJSONで返す
   - 無効な取得対象も有効状態付きで返す
+  - Repositoryの保存済み表示順を応答配列で維持する
 
 引数:
   - t *testing.T: テスト状態を管理する値
@@ -445,14 +446,17 @@ func TestListSourcesAPIReturnsSettingNamesAndIDs(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectQuery(
-		`(?s)SELECT id, name, kind, enabled.*FROM news_sources.*deleted_at IS NULL`,
+		`(?s)SELECT id, name, kind, enabled.*FROM news_sources.*` +
+			`deleted_at IS NULL.*ORDER BY display_order, id`,
 	).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id",
 			"name",
 			"kind",
 			"enabled",
-		}).AddRow(int64(5), "Reuters経済", "reuters", false))
+		}).
+			AddRow(int64(5), "後の名前", "reuters", false).
+			AddRow(int64(2), "先の名前", "rss", true))
 
 	server, err := New(postgres.New(db), nil, nil, 20)
 	if err != nil {
@@ -470,13 +474,18 @@ func TestListSourcesAPIReturnsSettingNamesAndIDs(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("JSONを解析できません: %v", err)
 	}
-	if len(response.Sources) != 1 ||
+	if len(response.Sources) != 2 ||
 		response.Sources[0].ID != 5 ||
-		response.Sources[0].Name != "Reuters経済" {
+		response.Sources[0].Name != "後の名前" ||
+		response.Sources[1].ID != 2 ||
+		response.Sources[1].Name != "先の名前" {
 		t.Errorf("sources = %#v", response.Sources)
 	}
 	if response.Sources[0].Enabled {
 		t.Error("無効な取得対象が有効として返されました")
+	}
+	if !response.Sources[1].Enabled {
+		t.Error("有効な取得対象が無効として返されました")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("DB期待値を満たしていません: %v", err)

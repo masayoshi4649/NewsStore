@@ -92,11 +92,33 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
 </div>
 
 {{if .Sources}}
+<!--
+[コンポーネント概要]
+#source-order-list は取得対象を表示順に並べたテーブル本体です。
+各行の data-source-id は並べ替え保存時に news_sources.id として送信します。
+
+.source-drag-handle は取得対象の行を上下へ移動する操作ボタンです。
+ポインター操作ではボタンをつまんで移動し、キーボード操作では上下矢印、Home、End を使用します。
+
+#source-order-description は利用可能な並べ替え操作を説明します。
+#source-order-status は保存中、保存完了、保存失敗を aria-live で通知します。
+
+#source-order-csrf は並べ替え保存 POST に使用する CSRF トークンを保持します。
+-->
+<div class="source-order-guidance">
+  <p id="source-order-description" class="source-order-description">
+    左端のハンドルをつまんで上下へ移動できます。キーボードでは上下矢印、Home、End を使用します。
+  </p>
+  <p id="source-order-status" class="source-order-status" role="status" aria-live="polite" aria-atomic="true"></p>
+  <input id="source-order-csrf" name="_csrf" type="hidden" value="{{.Base.CSRFToken}}">
+</div>
 <div class="box table-card">
   <div class="table-container">
-    <table class="table is-fullwidth is-hoverable">
+    <table class="table is-fullwidth is-hoverable"
+      aria-label="取得対象一覧" aria-describedby="source-order-description">
       <thead>
         <tr>
+          <th class="source-order-column" scope="col"><span class="is-sr-only">表示順</span></th>
           <th>名前</th>
           <th>種別</th>
           <th>状態</th>
@@ -107,9 +129,22 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
           <th class="actions-column">操作</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="source-order-list">
         {{range .Sources}}
-        <tr>
+        <tr class="source-order-row" data-source-id="{{.ID}}">
+          <td class="source-order-cell">
+            <button class="source-drag-handle" type="button"
+              aria-label="{{.Name}}の表示順を変更" aria-describedby="source-order-description">
+              <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false">
+                <circle cx="6" cy="4" r="1.5"></circle>
+                <circle cx="14" cy="4" r="1.5"></circle>
+                <circle cx="6" cy="10" r="1.5"></circle>
+                <circle cx="14" cy="10" r="1.5"></circle>
+                <circle cx="6" cy="16" r="1.5"></circle>
+                <circle cx="14" cy="16" r="1.5"></circle>
+              </svg>
+            </button>
+          </td>
           <td>
             <strong>{{.Name}}</strong>
             <span class="subtext">{{shorten .Description 48}}</span>
@@ -152,6 +187,7 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
     </table>
   </div>
 </div>
+<script src="/static/source-list.js" defer></script>
 {{else}}
 <section class="box empty-state">
   <h2 class="title is-4">取得対象がありません</h2>

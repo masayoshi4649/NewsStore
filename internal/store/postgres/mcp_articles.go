@@ -295,7 +295,7 @@ ListSourcesForMCP は、MCP から参照できる取得対象設定を一覧し�
 機能:
   - 論理削除されていない取得対象だけを返す
   - ID、設定名、コネクタ種別、有効状態だけを読み込む
-  - 設定名と ID の昇順で安定して並べる
+  - 保存済み表示順と ID の昇順で安定して並べる
 
 引数:
   - ctx context.Context: DB 操作の期限とキャンセルを伝えるコンテキスト
@@ -310,7 +310,7 @@ func (s *Store) ListSourcesForMCP(ctx context.Context) ([]MCPSource, error) {
 		`SELECT id, name, kind, enabled
 		FROM news_sources
 		WHERE deleted_at IS NULL
-		ORDER BY LOWER(name), id`,
+		ORDER BY display_order, id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("MCP向け取得対象を一覧できません: %w", err)

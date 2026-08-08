@@ -192,6 +192,118 @@ a:focus {
   vertical-align: top;
 }
 
+.source-order-guidance {
+  display: flex;
+  min-height: 1.5rem;
+  margin: -0.75rem 0 0.75rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  color: var(--newsstore-muted);
+  font-size: 0.8rem;
+}
+
+.source-order-description,
+.source-order-status {
+  margin: 0;
+}
+
+.source-order-status {
+  min-height: 1.25rem;
+  color: var(--newsstore-muted);
+  font-weight: 700;
+  text-align: right;
+}
+
+.source-order-status.is-success {
+  color: #77d8a0;
+}
+
+.source-order-status.is-error {
+  color: #ff9cae;
+}
+
+.source-order-column,
+.source-order-cell {
+  width: 3.5rem;
+  min-width: 3.5rem;
+  text-align: center !important;
+}
+
+.table-card .table td.source-order-cell {
+  padding-right: 0.55rem;
+  padding-left: 0.55rem;
+  vertical-align: middle;
+}
+
+.source-drag-handle {
+  display: inline-flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--newsstore-muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.source-drag-handle:hover,
+.source-drag-handle:focus-visible {
+  border-color: var(--newsstore-border-strong);
+  background: var(--newsstore-surface-hover);
+  color: var(--newsstore-text-strong);
+}
+
+.source-drag-handle:focus-visible {
+  outline: 2px solid var(--newsstore-brand);
+  outline-offset: 2px;
+}
+
+.source-drag-handle:active,
+.source-order-row.is-dragging .source-drag-handle {
+  cursor: grabbing;
+}
+
+.source-drag-handle svg {
+  fill: currentColor;
+  pointer-events: none;
+}
+
+.source-drag-handle:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.source-order-row {
+  transition: opacity 120ms ease;
+}
+
+.source-order-row.is-dragging {
+  position: relative;
+  z-index: 1;
+  opacity: 0.62;
+}
+
+.source-order-row.is-dragging td {
+  background: var(--newsstore-brand-dark);
+  box-shadow: inset 0 2px 0 var(--newsstore-brand), inset 0 -2px 0 var(--newsstore-brand);
+}
+
+#source-order-list.is-saving .source-order-row {
+  opacity: 0.72;
+}
+
+body.is-source-order-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .subtext {
   display: block;
   max-width: 26rem;
@@ -872,6 +984,15 @@ pre {
 @media screen and (max-width: 768px) {
   .app-main {
     padding: 1.5rem 0.75rem 2.5rem;
+  }
+
+  .source-order-guidance {
+    display: block;
+  }
+
+  .source-order-status {
+    margin-top: 0.35rem;
+    text-align: left;
   }
 
   .page-heading .level-right {

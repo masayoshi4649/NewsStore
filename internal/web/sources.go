@@ -121,6 +121,111 @@ func buildSourceListItems(sources []domain.Source) []sourceListItem {
 // ----------------------------------------
 
 /*
+updateSourceOrder は、取得対象一覧で変更された表示順を保存します。
+
+機能:
+  - フォームで送信された取得対象 ID を表示順どおりに解析する
+  - Repository で未削除の取得対象全件を原子的に並べ替える
+  - 別画面で一覧が更新されていた場合は再読込を促す競合応答を返す
+
+引数:
+  - c *gin.Context: 表示順と CSRF トークンを持つ HTTP コンテキスト
+
+返り値:
+  - なし
+*/
+func (s *Server) updateSourceOrder(c *gin.Context) {
+	sourceIDs, err := parseSourceOrderIDs(c.PostFormArray("source_ids"))
+	if err != nil {
+		respondSourceOrderError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.store.UpdateSourceOrder(c.Request.Context(), sourceIDs); err != nil {
+		if errors.Is(err, postgres.ErrInvalidSourceOrder) {
+			respondSourceOrderError(
+				c,
+				http.StatusConflict,
+				"取得対象の一覧が更新されています。画面を再読み込みしてから並べ替えてください。",
+			)
+			return
+		}
+		s.logger.Error("取得対象の表示順を保存できません", "error", err)
+		respondSourceOrderError(
+			c,
+			http.StatusInternalServerError,
+			"取得対象の表示順を保存できませんでした。",
+		)
+		return
+	}
+
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"message": "表示順を保存しました。"})
+}
+
+// ----------------------------------------
+
+/*
+parseSourceOrderIDs は、表示順フォームの取得対象 ID を解析します。
+
+機能:
+  - すべての値を 1 以上の 64 ビット整数として検証する
+  - 同じ取得対象 ID の重複を拒否する
+  - 入力配列の順序を維持して返す
+
+引数:
+  - values []string: source_ids フォーム項目の値
+
+返り値:
+  - []int64: 表示順どおりの取得対象 ID
+  - error: 空、不正な整数、または重複した ID がある場合のエラー
+*/
+func parseSourceOrderIDs(values []string) ([]int64, error) {
+	if len(values) == 0 {
+		return nil, errors.New("並べ替える取得対象が指定されていません")
+	}
+
+	sourceIDs := make([]int64, 0, len(values))
+	seen := make(map[int64]struct{}, len(values))
+	for _, value := range values {
+		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || id < 1 {
+			return nil, fmt.Errorf("取得対象 ID が不正です: %q", value)
+		}
+		if _, exists := seen[id]; exists {
+			return nil, fmt.Errorf("取得対象 ID が重複しています: %d", id)
+		}
+		seen[id] = struct{}{}
+		sourceIDs = append(sourceIDs, id)
+	}
+	return sourceIDs, nil
+}
+
+// ----------------------------------------
+
+/*
+respondSourceOrderError は、表示順保存 API のエラーを JSON で返します。
+
+機能:
+  - 応答をキャッシュ禁止にする
+  - 利用者へ表示できる安全なメッセージだけを返す
+
+引数:
+  - c *gin.Context: HTTP レスポンスを返す Gin コンテキスト
+  - status int: HTTP 状態コード
+  - message string: 利用者へ表示するエラーメッセージ
+
+返り値:
+  - なし
+*/
+func respondSourceOrderError(c *gin.Context, status int, message string) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(status, gin.H{"error": message})
+}
+
+// ----------------------------------------
+
+/*
 newSource は、新しい取得対象の入力フォームを表示します。
 
 機能:

@@ -34,7 +34,7 @@ type rowScanner interface {
 ListSources は、論理削除されていない取得対象を一覧します。
 
 機能:
-  - 取得対象を有効状態、名前、ID の順で並べる
+  - 取得対象を保存済み表示順、ID の順で安定して並べる
   - コネクタ固有設定を JSON のまま返す
 
 引数:
@@ -50,7 +50,7 @@ func (s *Store) ListSources(ctx context.Context) ([]domain.Source, error) {
 		`SELECT `+sourceColumns+`
 		FROM news_sources
 		WHERE deleted_at IS NULL
-		ORDER BY enabled DESC, LOWER(name), id`,
+		ORDER BY display_order, id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("取得対象を一覧できません: %w", err)
@@ -69,6 +69,109 @@ func (s *Store) ListSources(ctx context.Context) ([]domain.Source, error) {
 		return nil, fmt.Errorf("取得対象一覧を読み込めません: %w", err)
 	}
 	return sources, nil
+}
+
+// ----------------------------------------
+
+/*
+UpdateSourceOrder は、未削除の取得対象すべての表示順序を更新します。
+
+機能:
+  - 正の取得対象 ID が重複なく指定されていることを検証する
+  - 現在の未削除取得対象をトランザクション内でロックする
+  - 指定 ID の集合が現在の未削除取得対象全件と一致する場合だけ表示順序を確定する
+  - 指定配列の先頭を 1 とする連番を display_order へ保存する
+
+引数:
+  - ctx context.Context: DB 操作の期限とキャンセルを伝えるコンテキスト
+  - sourceIDs []int64: 先頭から表示したい順に並べた未削除取得対象 ID
+
+返り値:
+  - error: 入力順序が現在の一覧と一致しない場合、または DB 操作に失敗した場合のエラー
+*/
+func (s *Store) UpdateSourceOrder(ctx context.Context, sourceIDs []int64) error {
+	requestedIDs := make(map[int64]struct{}, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		if sourceID < 1 {
+			return ErrInvalidSourceOrder
+		}
+		if _, exists := requestedIDs[sourceID]; exists {
+			return ErrInvalidSourceOrder
+		}
+		requestedIDs[sourceID] = struct{}{}
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("取得対象の表示順序更新を開始できません: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT id
+		FROM news_sources
+		WHERE deleted_at IS NULL
+		ORDER BY id
+		FOR UPDATE`,
+	)
+	if err != nil {
+		return fmt.Errorf("表示順序を更新する取得対象を一覧できません: %w", err)
+	}
+	defer rows.Close()
+
+	currentIDs := make(map[int64]struct{}, len(sourceIDs))
+	for rows.Next() {
+		var sourceID int64
+		if err := rows.Scan(&sourceID); err != nil {
+			return fmt.Errorf("表示順序を更新する取得対象 ID を読み込めません: %w", err)
+		}
+		currentIDs[sourceID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("表示順序を更新する取得対象一覧を読み込めません: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("表示順序を更新する取得対象一覧を閉じられません: %w", err)
+	}
+
+	if len(currentIDs) != len(requestedIDs) {
+		return ErrInvalidSourceOrder
+	}
+	for sourceID := range currentIDs {
+		if _, exists := requestedIDs[sourceID]; !exists {
+			return ErrInvalidSourceOrder
+		}
+	}
+
+	for index, sourceID := range sourceIDs {
+		result, err := tx.ExecContext(
+			ctx,
+			`UPDATE news_sources
+			SET display_order = $2,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE id = $1 AND deleted_at IS NULL`,
+			sourceID,
+			int64(index+1),
+		)
+		if err != nil {
+			return fmt.Errorf("取得対象の表示順序を更新できません: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("取得対象の表示順序更新件数を確認できません: %w", err)
+		}
+		if affected != 1 {
+			return ErrInvalidSourceOrder
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("取得対象の表示順序を確定できません: %w", err)
+	}
+	return nil
 }
 
 // ----------------------------------------

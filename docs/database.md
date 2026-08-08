@@ -3,6 +3,7 @@
 テーブル名は 2 語の `snake_case` に統一し、`news_sources`、`news_articles`、`ingestion_runs`、`schema_migrations` を使用する。
 旧開発スキーマの全テーブルを削除済みであるため、`001_initial.sql` と `002_article_search_trigram.sql` はこの名称で新規作成する初期定義とする。
 通常画面の JSON API と MCP が共有する日時順検索用インデックスは、後続の `003_mcp_article_order.sql` で追加する。
+取得対象の表示順序は、後続の `004_source_display_order.sql` で既存テーブルへ追加する。
 
 ## `news_sources`
 
@@ -18,6 +19,7 @@
 | `fetch_interval_minutes` | `INTEGER` | 取得間隔 |
 | `max_items` | `INTEGER` | 1 回の最大取得件数 |
 | `settings` | `JSONB` | コネクタ固有設定 |
+| `display_order` | `BIGINT` | 管理画面と記事検索条件で共通する表示順序 |
 | `next_fetch_at` | `TIMESTAMPTZ` | 次回取得予定 |
 | `last_fetched_at` | `TIMESTAMPTZ` | 最終実行完了日時 |
 | `last_error` | `TEXT` | 直近エラー |
@@ -27,6 +29,9 @@
 
 有効な行の名前は大文字小文字を区別せず一意とする。
 削除は記事履歴を残すため論理削除とする。
+未削除の取得対象は `display_order`、`id` の昇順で安定して表示する。
+新規作成時は `display_order` の既定値で末尾へ追加し、利用者が並べ替えたときに未削除行へ 1 から始まる連番を保存する。
+定期取得の実行順序は `next_fetch_at` で決まり、`display_order` の影響を受けない。
 
 `settings` はコネクタ種別ごとに必要な項目だけを保存する。
 
@@ -126,3 +131,9 @@ SQL はバイナリへ埋め込み、起動設定 `postgres.auto_migrate` が有
 日時と記事 ID の組をカーソルに含めることで、`COUNT` と `OFFSET` を使わずに次ページを取得する。
 `003_mcp_article_order.sql` もトランザクション内の通常 `CREATE INDEX` で適用するため、
 既存記事が多い DB へ初めて適用する場合は書き込み停止時間と 10 分のマイグレーション期限を事前に検証する。
+
+`004_source_display_order.sql` は `news_sources.display_order` を `BIGINT NOT NULL` として追加する。
+既定値には `BIGINT` の最大値を使用し、新しいバイナリだけでなく列を指定しない旧バイナリから作成された取得対象も末尾へ配置する。
+既存の未削除行は、移行前の管理画面と同じく有効状態、設定名、ID の順に `ROW_NUMBER` で連番化する。
+一覧取得を効率化するため、未削除行だけを対象とする `news_sources_display_order_idx` を
+`display_order, id` に作成する。
