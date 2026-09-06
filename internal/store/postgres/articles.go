@@ -38,7 +38,7 @@ type ArticlePage struct {
 ArticleRevisionExists は、取得対象内に同じ記事リビジョンが保存済みか確認します。
 
 機能:
-  - source_id、external_id、revision_id の一意キーで存在確認する
+  - source_id、external_id、revision_id で保存中のリビジョンを確認する
   - Reuters の詳細 API を不要な再取得から保護する
 
 引数:
@@ -79,19 +79,22 @@ func (s *Store) ArticleRevisionExists(
 // ----------------------------------------
 
 /*
-InsertArticle は、記事をリビジョン単位で冪等に保存します。
+InsertArticle は、同じ記事と更新日時の内容を上書き保存します。
 
 機能:
   - 空の原データを空 JSON オブジェクトへ補正する
-  - 一意制約の競合時はエラーにせず保存をスキップする
-  - RETURNING を使って新規保存か重複かを判定する
+  - 取得対象、外部記事 ID、更新日時を一意キーとし、更新日時がなければ公開日時を使う
+  - 日時が両方未設定の記事も一行にまとめ、内容が変わった場合だけ上書きする
+  - 記事 ID と初回の取得日時を維持し、日時が異なる場合だけ履歴を追加する
+  - 保持期限が有効な場合だけ、更新日時、公開日時の順で判定して 168 時間以上前の記事は保存しない
+  - RETURNING を使って新規保存と上書き・重複を区別する
 
 引数:
   - ctx context.Context: DB 操作の期限とキャンセルを伝えるコンテキスト
   - article domain.Article: 保存する見出しと本文を含む記事
 
 返り値:
-  - bool: 新規保存した場合は true、既存リビジョンの場合は false
+  - bool: 新規保存した場合は true、上書き・変更なし・保存期限切れの場合は false
   - error: INSERT に失敗した場合のエラー
 */
 func (s *Store) InsertArticle(ctx context.Context, article domain.Article) (bool, error) {
@@ -100,7 +103,7 @@ func (s *Store) InsertArticle(ctx context.Context, article domain.Article) (bool
 		rawPayload = json.RawMessage(`{}`)
 	}
 
-	var id int64
+	var inserted bool
 	err := s.db.QueryRowContext(
 		ctx,
 		`INSERT INTO news_articles (
@@ -114,9 +117,39 @@ func (s *Store) InsertArticle(ctx context.Context, article domain.Article) (bool
 			headline,
 			body_text,
 			raw_payload
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		ON CONFLICT (source_id, external_id, revision_id) DO NOTHING
-		RETURNING id`,
+		) SELECT
+			$1::BIGINT, $2::TEXT, $3::TEXT, $4::TEXT, $5::TEXT,
+			$6::TIMESTAMPTZ, $7::TIMESTAMPTZ, $8::TEXT, $9::TEXT, $10::JSONB
+		WHERE NOT $11::BOOLEAN
+			OR COALESCE($7::TIMESTAMPTZ, $6::TIMESTAMPTZ, CURRENT_TIMESTAMP)
+				> CURRENT_TIMESTAMP - INTERVAL '168 hours'
+		ON CONFLICT (
+			source_id, external_id,
+			(COALESCE(updated_at, published_at, '-infinity'::TIMESTAMPTZ))
+		) DO UPDATE SET
+			provider = EXCLUDED.provider,
+			revision_id = EXCLUDED.revision_id,
+			canonical_url = EXCLUDED.canonical_url,
+			published_at = EXCLUDED.published_at,
+			updated_at = EXCLUDED.updated_at,
+			headline = EXCLUDED.headline,
+			body_text = EXCLUDED.body_text,
+			raw_payload = EXCLUDED.raw_payload
+		WHERE (
+			NOT $11::BOOLEAN
+			OR COALESCE(news_articles.updated_at, news_articles.published_at, news_articles.fetched_at)
+				> CURRENT_TIMESTAMP - INTERVAL '168 hours'
+		)
+		AND (
+			news_articles.provider, news_articles.revision_id, news_articles.canonical_url,
+			news_articles.published_at, news_articles.updated_at, news_articles.headline,
+			news_articles.body_text, news_articles.raw_payload
+		) IS DISTINCT FROM (
+			EXCLUDED.provider, EXCLUDED.revision_id, EXCLUDED.canonical_url,
+			EXCLUDED.published_at, EXCLUDED.updated_at, EXCLUDED.headline,
+			EXCLUDED.body_text, EXCLUDED.raw_payload
+		)
+		RETURNING (xmax = 0) AS inserted`,
 		article.SourceID,
 		article.Provider,
 		article.ExternalID,
@@ -127,7 +160,8 @@ func (s *Store) InsertArticle(ctx context.Context, article domain.Article) (bool
 		article.Headline,
 		article.BodyText,
 		string(rawPayload),
-	).Scan(&id)
+		s.articleRetentionEnabled,
+	).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -139,7 +173,7 @@ func (s *Store) InsertArticle(ctx context.Context, article domain.Article) (bool
 			err,
 		)
 	}
-	return true, nil
+	return inserted, nil
 }
 
 // ----------------------------------------

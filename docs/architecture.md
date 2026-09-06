@@ -5,7 +5,7 @@
 NewsStore は、RSS/Atom フィードと個別の REST API からニュース記事を取得し、見出しと本文を PostgreSQL に保存する。
 取得対象、取得間隔、コネクタ固有設定は管理画面から変更し、PostgreSQL を正本とする。
 `conf/*.toml` は、DB 接続、HTTP サーバーの待受ポート、MCP の既定記事件数といったアプリ起動設定だけを扱う。
-実行設定は `conf/system.toml`、MCP 設定は `conf/mcp.toml`、PostgreSQL 接続設定は `conf/postgres.toml` に分離する。
+実行設定は `conf/system.toml`、MCP 設定は `conf/mcp.toml`、PostgreSQL 接続設定は `conf/postgres.toml`、記事の保持設定は `conf/retention.toml` に分離する。
 
 ## 実行構成
 
@@ -60,6 +60,7 @@ HTML、CSS、JavaScript、ローカル Web ライブラリ、PostgreSQL マイ�
 - `conf/system.toml`: `[SYSTEM]` セクションの `Port` による HTTP 待受ポート設定
 - `conf/mcp.toml`: `[MCP]` セクションの無条件検索時の既定記事件数
 - `conf/postgres.toml`: PostgreSQL の接続、コネクションプール、マイグレーション設定
+- `conf/retention.toml`: `[retention] enabled` による 7 日保持の有効・無効
 
 `conf/system.toml` の正規形は次の 1 設定だけとする。
 
@@ -71,6 +72,8 @@ Port = 8080
 設定全体のサンプルは `conf/conf.toml.sample` に保存する。
 HTTP サーバーは `Port` から `:Port` 形式のアドレスを組み立て、全インターフェースで待ち受ける。
 `conf/mcp.toml` の `[MCP] DefaultArticleLimit` は既定 20、1 以上 100 以下とする。
+`[retention] enabled` は既定 `false` とし、未指定の場合も無効とする。起動時に読み込み、設定変更は再起動で反映する。
+`true` の場合だけ記事の自動削除と期限切れ記事の保存省略を有効にし、同日時上書きは設定にかかわらず有効とする。
 
 ## Web ルーティング
 
@@ -121,12 +124,13 @@ Reuters では URL や内部 API パラメーターを入力させず、利用�
 2. 手動取得も同じキューへ入り、HTTP リクエストを長時間占有しない。
 3. 取り込みサービスはプロセス内マップと PostgreSQL advisory lock の二段階で、取得対象単位の同時実行を抑止する。
 4. コネクタは見出しと本文を含む共通記事モデルを返す。
-5. DB の一意制約と `INSERT ... ON CONFLICT DO NOTHING` を最終的な重複防止にする。
+5. DB の一意キー `(source_id, external_id, COALESCE(updated_at, published_at, '-infinity'::timestamptz))` と `INSERT ... ON CONFLICT DO UPDATE` で、同じ記事の同日時を上書きし、異なる日時だけを別行に保存する。上書き時は記事 ID と `fetched_at` を維持する。
 6. 取得履歴の完了と取得対象の次回予定は同じ DB トランザクションで確定する。
 7. 個別記事の取得失敗は警告として記録し、取得可能な他の記事は保存する。
 8. 起動時は古い `running` 履歴を確認し、該当取得対象の advisory lock が空いている場合だけ異常終了後の履歴として回復する。
 9. Reuters は DB の `endpoint_url` に `https://jp.reuters.com` を保持し、`settings` には選択した `section_id` だけを新規保存する。
 10. Reuters コネクタは `website=reuters-japan`、`offset=0`、一覧 API、詳細 API をコード上の固定値で補完する。
+11. `[retention] enabled = true` の場合だけ、起動時と 1 時間ごとに `COALESCE(updated_at, published_at, fetched_at) <= CURRENT_TIMESTAMP - INTERVAL '168 hours'` の記事を削除し、保存時も期限切れ記事を省略する。取得対象の設定と取得履歴は残す。`false` または未指定の場合は両処理を無効にする。
 
 通常画面の JSON API と MCP の参照経路は取得処理から分離し、記事検索と本文分割の PostgreSQL Repository を共有する。
 

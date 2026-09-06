@@ -1,6 +1,6 @@
 # NewsStore
 
-RSS / Atom と Reuters からニュース記事の見出し・本文を取得し、PostgreSQL へリビジョン単位で保存する Go アプリです。
+RSS / Atom と Reuters からニュース記事の見出し・本文を取得し、PostgreSQL へ記事の更新日時単位で保存する Go アプリです。
 Gin 製の管理画面から取得対象、記事、取得履歴を管理できます。
 通常の記事画面は同一オリジンの JSON API を Axios から呼び出して表示します。
 保存済み記事は、同じ HTTP サーバーの読み取り専用 MCP から参照できます。
@@ -41,7 +41,7 @@ Gin 製の管理画面から取得対象、記事、取得履歴を管理でき�
 
 ## 設定
 
-実行設定は `conf/system.toml`、MCP 設定は `conf/mcp.toml`、PostgreSQL 接続設定は `conf/postgres.toml` に分けて配置します。
+実行設定は `conf/system.toml`、MCP 設定は `conf/mcp.toml`、PostgreSQL 接続設定は `conf/postgres.toml`、記事の保持設定は `conf/retention.toml` に分けて配置します。
 全設定の記載例は `conf/conf.toml.sample` を参照してください。
 `conf/postgres.toml` はパスワードを含むため Git 管理対象外です。
 
@@ -51,6 +51,7 @@ Gin 製の管理画面から取得対象、記事、取得履歴を管理でき�
 - `conf/system.toml`: `[SYSTEM]` の待受ポート
 - `conf/mcp.toml`: `[MCP]` の無条件検索時の既定記事件数
 - `conf/postgres.toml`: `[postgres]`
+- `conf/retention.toml`: `[retention]` の 7 日保持の有効・無効
 
 `conf/system.toml`:
 
@@ -68,6 +69,18 @@ DefaultArticleLimit = 20
 
 `DefaultArticleLimit` は 1 以上 100 以下で指定します。
 `conf/system.toml` には `[SYSTEM] Port` 以外を追加しません。
+
+`conf/retention.toml`:
+
+```toml
+[retention]
+enabled = false
+```
+
+`enabled` の既定値は `false` で、設定を省略した場合も無効です。
+`true` にすると、7 日（168 時間）以上前の記事の自動削除と、期限を過ぎた記事の新規保存の省略を両方有効にします。
+更新日時、公開日時、初回取得日時の順に存在する日時で判定し、起動時と 1 時間ごとに記事を削除します。取得対象の設定と取得履歴は削除しません。
+設定を変更した後はアプリケーションを再起動してください。同日時の記事の上書きは、この設定にかかわらず有効です。
 
 `conf/postgres.toml` の最小例:
 
@@ -273,10 +286,22 @@ go build .
 
 通常テストは実 PostgreSQL や外部サイトへ接続しません。
 
+記事の上書き、重複整理の移行、保持設定による動作を実 PostgreSQL で検証する場合は、次の環境変数を指定します。
+テストは無作為な専用スキーマだけへデータを書き込み、終了時にそのスキーマを削除します。DB ユーザーにはスキーマ作成権限が必要で、`pg_trgm` は事前に導入されている必要があります。
+
+```powershell
+$env:NEWSSTORE_TEST_POSTGRES_WRITE_LIVE = "1"
+$env:NEWSSTORE_TEST_POSTGRES_CONF = (Resolve-Path .\conf).Path
+go test -count=1 -run 'TestLiveArticle(TimestampIdentity|TimestampMigration|Retention)$' -v ./internal/store/postgres
+Remove-Item Env:NEWSSTORE_TEST_POSTGRES_WRITE_LIVE, Env:NEWSSTORE_TEST_POSTGRES_CONF
+```
+
 ## データの扱い
 
-- 記事は `(source_id, external_id, revision_id)` 単位で保存します。
-- 同じ記事の同じリビジョンは再実行しても増えません。
-- 別リビジョンは履歴として別行に保存します。
+- 記事は取得対象、外部記事 ID、更新日時の組み合わせで保存します。更新日時がない場合は公開日時を使い、両方ない場合も同じ記事を 1 行にまとめます。
+- 同じ記事の同じ日時は、リビジョンや本文が変わっても最新の取得内容で上書きします。日時が異なる場合は履歴として別行に保存します。
+- 上書き時は記事 ID と、その行を初めて保存した取得日時を維持します。
+- 既存の同日時の重複は、マイグレーションで取得日時、記事 ID の降順に先頭の 1 行を残して削除します。
+- 7 日保持は `[retention] enabled = true` の場合だけ有効です。既定の `false` では、古い記事の自動削除と保存期限による制限を行いません。
 - 取得対象の削除は論理削除で、保存済み記事と取得履歴を保持します。
 - 本文はプレーンテキストとして保存・表示します。

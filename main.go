@@ -92,6 +92,8 @@ func run(args []string) error {
 		return err
 	}
 	defer store.Close()
+	store.SetArticleRetentionEnabled(cfg.Retention.Enabled)
+	logger.Info("記事の保持期限を設定しました", "enabled", cfg.Retention.Enabled)
 
 	// ----------------------------------------
 
@@ -283,6 +285,7 @@ func serve(
 		cfg.Worker.Concurrency,
 		logger,
 	)
+	manager.SetArticleRetentionEnabled(cfg.Retention.Enabled)
 	webServer, err := web.New(
 		store,
 		manager,

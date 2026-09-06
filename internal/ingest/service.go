@@ -88,7 +88,7 @@ func New(repository Repository, registry *connector.Registry, logger *slog.Logge
 // ----------------------------------------
 
 /*
-Run は、指定取得対象の記事を取得してリビジョン単位で保存します。
+Run は、指定取得対象の記事を取得して記事と更新日時の単位で保存します。
 
 機能:
   - 同じ取得対象のプロセス内同時実行を抑止する

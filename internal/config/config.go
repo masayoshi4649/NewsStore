@@ -42,11 +42,12 @@ type Duration struct {
 
 // Config は、NewsStore 全体の設定を保持します。
 type Config struct {
-	System   SystemConfig   `toml:"SYSTEM"`
-	Postgres PostgresConfig `toml:"postgres"`
-	Worker   WorkerConfig   `toml:"worker"`
-	HTTP     HTTPConfig     `toml:"http"`
-	MCP      MCPConfig      `toml:"MCP"`
+	System    SystemConfig    `toml:"SYSTEM"`
+	Postgres  PostgresConfig  `toml:"postgres"`
+	Worker    WorkerConfig    `toml:"worker"`
+	Retention RetentionConfig `toml:"retention"`
+	HTTP      HTTPConfig      `toml:"http"`
+	MCP       MCPConfig       `toml:"MCP"`
 }
 
 // SystemConfig は、NewsStore 全体のシステム設定を保持します。
@@ -71,6 +72,11 @@ type PostgresConfig struct {
 type WorkerConfig struct {
 	PollInterval Duration `toml:"poll_interval"`
 	Concurrency  int      `toml:"concurrency"`
+}
+
+// RetentionConfig は、記事の保持期間制限を適用するかどうかを保持します。
+type RetentionConfig struct {
+	Enabled bool `toml:"enabled"`
 }
 
 // HTTPConfig は、外部 HTTP 通信の制限と識別情報を保持します。

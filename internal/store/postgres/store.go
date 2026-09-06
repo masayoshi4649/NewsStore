@@ -16,8 +16,30 @@ import (
 
 // Store は、PostgreSQL 接続を共有する Repository です。
 type Store struct {
-	db *sql.DB
+	db                      *sql.DB
+	articleRetentionEnabled bool
 }
+
+// ----------------------------------------
+
+/*
+SetArticleRetentionEnabled は、記事保存時の保持期限判定を切り替えます。
+
+機能:
+  - 起動時に一度だけ設定し、有効な場合だけ 7 日以上前の記事を保存対象から外す
+  - 既定値は無効とし、記事保存を開始した後には変更しない
+
+引数:
+  - enabled bool: 保持期限を有効にする場合は true
+
+返り値:
+  - なし
+*/
+func (s *Store) SetArticleRetentionEnabled(enabled bool) {
+	s.articleRetentionEnabled = enabled
+}
+
+// ----------------------------------------
 
 /*
 Open は、設定から PostgreSQL 接続を開いて疎通確認を行います。

@@ -49,6 +49,9 @@ func TestDefault(t *testing.T) {
 	if cfg.Worker.Concurrency != 2 {
 		t.Errorf("Worker.Concurrency = %d, 期待値は %d", cfg.Worker.Concurrency, 2)
 	}
+	if cfg.Retention.Enabled {
+		t.Error("保持期間による自動削除は既定で無効を期待")
+	}
 	if cfg.HTTP.Timeout.Duration != 20*time.Second {
 		t.Errorf("HTTP.Timeout = %s, 期待値は %s", cfg.HTTP.Timeout, 20*time.Second)
 	}
@@ -64,6 +67,85 @@ func TestDefault(t *testing.T) {
 			cfg.MCP.DefaultArticleLimit,
 			20,
 		)
+	}
+}
+
+// ----------------------------------------
+
+/*
+TestLoadDirArticleRetention は、記事の保持期間制限の設定を検証します。
+
+機能:
+  - 未指定時は自動削除が無効で、明示した真偽値を読み込めることを確認する
+  - 複数ファイルによる有効化、無効化、未指定項目の維持を確認する
+  - 真偽値以外の値と未知の保持期間設定を拒否することを確認する
+
+引数:
+  - t *testing.T: テスト状態を管理する値
+
+返り値:
+  - なし
+*/
+func TestLoadDirArticleRetention(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		base      string
+		override  string
+		enabled   bool
+		wantError bool
+	}{
+		{name: "未指定は無効"},
+		{name: "明示的に無効", base: "[retention]\nenabled = false\n"},
+		{name: "明示的に有効", base: "[retention]\nenabled = true\n", enabled: true},
+		{
+			name:     "有効から無効へ上書き",
+			base:     "[retention]\nenabled = true\n",
+			override: "[retention]\nenabled = false\n",
+		},
+		{
+			name:     "無効から有効へ上書き",
+			base:     "[retention]\nenabled = false\n",
+			override: "[retention]\nenabled = true\n",
+			enabled:  true,
+		},
+		{
+			name:     "後続ファイルで未指定なら維持",
+			base:     "[retention]\nenabled = true\n",
+			override: "[SYSTEM]\nPort = 9090\n",
+			enabled:  true,
+		},
+		{name: "文字列は拒否", base: "[retention]\nenabled = \"true\"\n", wantError: true},
+		{name: "未知の項目は拒否", base: "[retention]\nenable = true\n", wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			writeValidMinimumConfig(t, dir)
+			if test.base != "" {
+				writeTestFile(t, dir, "20-retention.toml", test.base)
+			}
+			if test.override != "" {
+				writeTestFile(t, dir, "30-retention.toml", test.override)
+			}
+
+			cfg, err := LoadDir(dir)
+			if test.wantError {
+				if err == nil {
+					t.Fatal("不正な保持期間設定に対する読み込みエラーを期待")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("保持期間設定を読み込めません: %v", err)
+			}
+			if cfg.Retention.Enabled != test.enabled {
+				t.Errorf("保持期間制限の設定 = %t, 期待値は %t", cfg.Retention.Enabled, test.enabled)
+			}
+		})
 	}
 }
 

@@ -4,6 +4,7 @@
 旧開発スキーマの全テーブルを削除済みであるため、`001_initial.sql` と `002_article_search_trigram.sql` はこの名称で新規作成する初期定義とする。
 通常画面の JSON API と MCP が共有する日時順検索用インデックスは、後続の `003_mcp_article_order.sql` で追加する。
 取得対象の表示順序は、後続の `004_source_display_order.sql` で既存テーブルへ追加する。
+記事の保存キーは `005_article_timestamp_identity.sql` で更新日時単位へ変更し、同じ記事の同日時の重複を整理する。
 
 ## `news_sources`
 
@@ -58,7 +59,7 @@ Reuters の URL は `endpoint_url` に固定値 `https://jp.reuters.com` を保�
 
 ## `news_articles`
 
-記事は 1 リビジョンを 1 行として保存する。
+記事は取得対象、外部記事 ID、更新日時の組み合わせごとに 1 行として保存する。
 
 | 列 | 型 | 用途 |
 | --- | --- | --- |
@@ -73,18 +74,29 @@ Reuters の URL は `endpoint_url` に固定値 `https://jp.reuters.com` を保�
 | `headline` | `TEXT` | 見出し |
 | `body_text` | `TEXT` | プレーンテキスト本文 |
 | `raw_payload` | `JSONB` | 取得時の正規化データ。Reuters の上限超過時はサイズと SHA-256 |
-| `fetched_at` | `TIMESTAMPTZ` | 取得日時 |
+| `fetched_at` | `TIMESTAMPTZ` | その行を初めて保存した取得日時。上書き時も維持 |
 
-`(source_id, external_id, revision_id)` を一意制約とする。
-アプリ側の事前確認に依存せず、`ON CONFLICT DO NOTHING` で同時実行時も冪等にする。
+`(source_id, external_id, COALESCE(updated_at, published_at, '-infinity'::timestamptz))` を一意キーとする。
+更新日時がない記事は公開日時を使い、両方ない記事も同じ取得対象・外部記事 ID なら 1 行にまとめる。
+アプリ側の事前確認に依存せず、`ON CONFLICT DO UPDATE` で同時実行時も重複を防ぐ。
+同じ日時の記事はリビジョン、見出し、本文などを最新の取得内容で上書きし、記事 ID と `fetched_at` は維持する。
+日時が異なる場合は別行に保存する。`revision_id` は取得内容の識別と Reuters の再取得省略に使用し、保存行の一意キーには含めない。
 
 RSS の `external_id` は GUID、リンク、安定情報の SHA-256 の順で決める。
 RSS にリビジョンがない場合は、見出し、本文、更新日時から SHA-256 を計算する。
 Reuters は API の `id` と `revision_id` を使用する。
+更新日時を変えずに本文やリビジョンだけが変化した場合も、保存行は増えない。
 
 通常画面の JSON API と MCP では `COALESCE(published_at, fetched_at)` を記事の実効日時として扱う。
 公開日時がある記事は公開日時、ない記事は取得日時を日時範囲の判定と並べ替えに使用する。
 実効日時の降順、同日時では `id` の降順に並べる。
+
+`conf/retention.toml` の `[retention] enabled` が `true` の場合だけ、記事の保持期間を 7 日（168 時間）に制限する。
+既定値は `false` で、設定の省略時も自動削除と保存期限による制限を行わない。同日時の記事の上書きは設定の有無にかかわらず有効とする。
+有効時の削除条件は `COALESCE(updated_at, published_at, fetched_at) <= CURRENT_TIMESTAMP - INTERVAL '168 hours'` とし、境界の日時を含む。
+更新日時、公開日時、初回取得日時の順に存在する日時で判定し、起動時と 1 時間ごとに期限を過ぎた記事を削除する。
+保存時も期限を確認し、期限を過ぎた記事を新たに保存しない。上書き時は `fetched_at` を維持し、日時のない既存行の保持期限を延長しない。
+取得対象の設定と取得履歴は削除しない。
 
 ## `ingestion_runs`
 
@@ -100,7 +112,7 @@ Reuters は API の `id` と `revision_id` を使用する。
 | `finished_at` | `TIMESTAMPTZ` | 終了日時 |
 | `fetched_count` | `INTEGER` | コネクタが返した記事数 |
 | `inserted_count` | `INTEGER` | 新規保存数 |
-| `skipped_count` | `INTEGER` | 重複数 |
+| `skipped_count` | `INTEGER` | 上書き、変更なし、保持設定が有効な場合の期限切れなど、新規保存を省略した件数 |
 | `warning_count` | `INTEGER` | 個別警告数 |
 | `error_message` | `TEXT` | エラーまたは警告要約 |
 
@@ -137,3 +149,11 @@ SQL はバイナリへ埋め込み、起動設定 `postgres.auto_migrate` が有
 既存の未削除行は、移行前の管理画面と同じく有効状態、設定名、ID の順に `ROW_NUMBER` で連番化する。
 一覧取得を効率化するため、未削除行だけを対象とする `news_sources_display_order_idx` を
 `display_order, id` に作成する。
+
+`005_article_timestamp_identity.sql` は、同じ取得対象・外部記事 ID・保存判定日時の行を
+`fetched_at DESC, id DESC` で並べ、先頭の 1 行を残して重複を削除する。
+その後、旧制約 `news_articles_source_revision_uq` を削除して更新日時単位の一意インデックスを作成する。
+更新日時と公開日時が両方ない既存記事も、同じ取得対象・外部記事 ID ごとに 1 行を残す。
+
+`006_article_retention.sql` は、`COALESCE(updated_at, published_at, fetched_at)` の式インデックスを作成する。
+索引の作成だけでは記事を削除せず、保持設定が有効な場合の期限検索に使用する。適用済み SQL のチェックサムは維持する。

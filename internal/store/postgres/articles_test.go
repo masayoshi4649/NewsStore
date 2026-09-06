@@ -92,8 +92,9 @@ func TestInsertArticleReturnsInserted(t *testing.T) {
 			article.Headline,
 			article.BodyText,
 			string(article.RawPayload),
+			false,
 		).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(10)))
+		WillReturnRows(sqlmock.NewRows([]string{"inserted"}).AddRow(true))
 
 	inserted, err := store.InsertArticle(context.Background(), article)
 	if err != nil {
@@ -144,8 +145,9 @@ func TestInsertArticleReturnsSkippedOnConflict(t *testing.T) {
 			article.Headline,
 			article.BodyText,
 			string(article.RawPayload),
+			false,
 		).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"inserted"}))
 
 	inserted, err := store.InsertArticle(context.Background(), article)
 	if err != nil {
@@ -197,6 +199,7 @@ func TestInsertArticleUsesEmptyJSONObject(t *testing.T) {
 			article.Headline,
 			article.BodyText,
 			"{}",
+			false,
 		).
 		WillReturnError(sql.ErrNoRows)
 
@@ -206,6 +209,50 @@ func TestInsertArticleUsesEmptyJSONObject(t *testing.T) {
 	}
 	if inserted {
 		t.Error("InsertArticle() inserted = true, 期待値は false")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("SQL期待値が満たされません: %v", err)
+	}
+}
+
+// ----------------------------------------
+
+/*
+TestInsertArticleReturnsFalseOnOverwrite は、上書きを新規保存として数えないことを検証します。
+
+機能:
+  - DB が上書き済みの行を返した場合の返り値を確認する
+
+引数:
+  - t *testing.T: テスト状態を管理する値
+
+返り値:
+  - なし
+*/
+func TestInsertArticleReturnsFalseOnOverwrite(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("SQL モックを作成できません: %v", err)
+	}
+	defer db.Close()
+	article := testArticle()
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO news_articles")).
+		WithArgs(article.SourceID, article.Provider, article.ExternalID, article.RevisionID,
+			article.CanonicalURL, sqlmock.AnyArg(), sqlmock.AnyArg(), article.Headline,
+			article.BodyText, string(article.RawPayload), false).
+		WillReturnRows(sqlmock.NewRows([]string{"inserted"}).AddRow(false))
+
+	inserted, err := New(db).InsertArticle(context.Background(), article)
+	if err != nil {
+		t.Fatalf("記事を上書きできません: %v", err)
+	}
+	if inserted {
+		t.Error("上書きの返り値が新規保存になっています")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("SQL 期待値が満たされません: %v", err)
 	}
 }
 
@@ -224,7 +271,7 @@ testArticle は、Repositoryテスト用の有効な記事を生成します。
   - domain.Article: 全保存項目を持つテスト記事
 */
 func testArticle() domain.Article {
-	publishedAt := time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
+	publishedAt := time.Now().UTC().Truncate(time.Microsecond).Add(-2 * time.Hour)
 	updatedAt := publishedAt.Add(time.Hour)
 	return domain.Article{
 		SourceID:     1,

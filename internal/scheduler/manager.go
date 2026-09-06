@@ -12,9 +12,10 @@ import (
 	"github.com/masayoshi4649/NewsStore/internal/ingest"
 )
 
-// DueSourceRepository は、定期取得期限が到来した取得対象を返します。
+// DueSourceRepository は、定期取得対象の確認と期限切れ記事の削除を行います。
 type DueSourceRepository interface {
 	ListDueSourceIDs(ctx context.Context, limit int) ([]int64, error)
+	DeleteExpiredArticles(ctx context.Context) (int64, error)
 }
 
 // Runner は、キューから受け取った取得対象を実行します。
@@ -30,13 +31,15 @@ type Job struct {
 
 // Manager は、期限確認、重複しないキュー、並列ワーカーを管理します。
 type Manager struct {
-	repository   DueSourceRepository
-	runner       Runner
-	pollInterval time.Duration
-	logger       *slog.Logger
-	jobs         chan Job
-	pendingMu    sync.Mutex
-	pending      map[int64]struct{}
+	repository              DueSourceRepository
+	runner                  Runner
+	pollInterval            time.Duration
+	retentionInterval       time.Duration
+	articleRetentionEnabled bool
+	logger                  *slog.Logger
+	jobs                    chan Job
+	pendingMu               sync.Mutex
+	pending                 map[int64]struct{}
 }
 
 /*
@@ -47,7 +50,7 @@ New は、記事取得スケジューラーを生成します。
   - 同じ取得対象の重複キューを防ぐ管理領域を初期化する
 
 引数:
-  - repository DueSourceRepository: 期限到来した取得対象を返す Repository
+  - repository DueSourceRepository: 期限到来した取得対象の確認と記事削除を行う Repository
   - runner Runner: 記事取得を実行するサービス
   - pollInterval time.Duration: DB の期限を確認する間隔
   - concurrency int: 同時実行するワーカー数
@@ -74,13 +77,33 @@ func New(
 	}
 
 	return &Manager{
-		repository:   repository,
-		runner:       runner,
-		pollInterval: pollInterval,
-		logger:       logger,
-		jobs:         make(chan Job, concurrency*8),
-		pending:      make(map[int64]struct{}),
+		repository:        repository,
+		runner:            runner,
+		pollInterval:      pollInterval,
+		retentionInterval: time.Hour,
+		logger:            logger,
+		jobs:              make(chan Job, concurrency*8),
+		pending:           make(map[int64]struct{}),
 	}
+}
+
+// ----------------------------------------
+
+/*
+SetArticleRetentionEnabled は、保持期間を過ぎた記事の自動削除を切り替えます。
+
+機能:
+  - 既定で無効の記事削除を設定値に応じて有効化または無効化する
+  - Run を開始する前に呼び出し、実行中は設定を変更しない
+
+引数:
+  - enabled bool: 自動削除を有効にする場合は true
+
+返り値:
+  - なし
+*/
+func (m *Manager) SetArticleRetentionEnabled(enabled bool) {
+	m.articleRetentionEnabled = enabled
 }
 
 // ----------------------------------------
@@ -90,6 +113,7 @@ Run は、期限確認ループと指定数のワーカーを開始します。
 
 機能:
   - 開始直後と一定間隔ごとに期限到来した取得対象をキューへ入れる
+  - 自動削除が有効な場合だけ、開始直後と 1 時間ごとに保持期間を過ぎた記事を削除する
   - コンテキスト終了までワーカーを稼働する
   - 全ワーカー終了後に返る
 
@@ -114,6 +138,13 @@ func (m *Manager) Run(ctx context.Context, concurrency int) {
 		}(index + 1)
 	}
 
+	var retentionTicks <-chan time.Time
+	if m.articleRetentionEnabled {
+		m.deleteExpiredArticles(ctx)
+		retentionTicker := time.NewTicker(m.retentionInterval)
+		defer retentionTicker.Stop()
+		retentionTicks = retentionTicker.C
+	}
 	m.enqueueDue(ctx)
 	ticker := time.NewTicker(m.pollInterval)
 	defer ticker.Stop()
@@ -124,7 +155,39 @@ func (m *Manager) Run(ctx context.Context, concurrency int) {
 			return
 		case <-ticker.C:
 			m.enqueueDue(ctx)
+		case <-retentionTicks:
+			m.deleteExpiredArticles(ctx)
 		}
+	}
+}
+
+// ----------------------------------------
+
+/*
+deleteExpiredArticles は、期限を制限して保持期間を過ぎた記事を削除します。
+
+機能:
+  - 取得対象の有無や記事取得の成否にかかわらず記事の保持期限を適用する
+  - 削除処理の上限を 1 分に設定し、失敗してもスケジューラーを継続する
+  - 削除した記事が存在する場合は件数を記録する
+
+引数:
+  - ctx context.Context: スケジューラー終了を伝えるコンテキスト
+
+返り値:
+  - なし
+*/
+func (m *Manager) deleteExpiredArticles(ctx context.Context) {
+	cleanupCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	deleted, err := m.repository.DeleteExpiredArticles(cleanupCtx)
+	if err != nil {
+		m.logger.Error("保持期間を過ぎた記事を削除できません", "error", err)
+		return
+	}
+	if deleted > 0 {
+		m.logger.Info("保持期間を過ぎた記事を削除しました", "deleted_count", deleted)
 	}
 }
 
