@@ -5,6 +5,7 @@
 通常画面の JSON API と MCP が共有する日時順検索用インデックスは、後続の `003_mcp_article_order.sql` で追加する。
 取得対象の表示順序は、後続の `004_source_display_order.sql` で既存テーブルへ追加する。
 記事の保存キーは `005_article_timestamp_identity.sql` で更新日時単位へ変更し、同じ記事の同日時の重複を整理する。
+取得対象の種類には `007_fisco_connector.sql` で `fisco` を追加する。
 
 ## `news_sources`
 
@@ -14,8 +15,8 @@
 | --- | --- | --- |
 | `id` | `BIGINT` | 主キー |
 | `name` | `TEXT` | 管理画面表示名 |
-| `kind` | `TEXT` | `rss` または `reuters` |
-| `endpoint_url` | `TEXT` | RSS URL、または Reuters の固定 URL `https://jp.reuters.com` |
+| `kind` | `TEXT` | `rss`、`reuters`、`fisco` のいずれか |
+| `endpoint_url` | `TEXT` | RSS URL、Reuters の固定 URL `https://jp.reuters.com`、または Fisco の固定 URL `https://web.fisco.jp/FiscoWeb/news` |
 | `enabled` | `BOOLEAN` | 定期取得の有効状態 |
 | `fetch_interval_minutes` | `INTEGER` | 取得間隔 |
 | `max_items` | `INTEGER` | 1 回の最大取得件数 |
@@ -57,6 +58,16 @@ Reuters の URL は `endpoint_url` に固定値 `https://jp.reuters.com` を保�
 `website=reuters-japan` と `offset=0` はコード上の固定値とし、Reuters の新規作成・更新時に `settings` へ保存しない。
 初期スキーマでは、Reuters の固定 URL と `section_id` をこの形式で保存する。
 
+Fisco の新規保存例:
+
+```json
+{}
+```
+
+Fisco は固有設定を持たず、`settings` には空の JSON オブジェクトを保存する。
+`endpoint_url` は固定値 `https://web.fisco.jp/FiscoWeb/news` とし、一覧の `isRemarkable=false` と詳細 API はコードで固定する。
+一覧の `limit` には共通設定 `max_items`（1 以上 50 以下）を使用する。
+
 ## `news_articles`
 
 記事は取得対象、外部記事 ID、更新日時の組み合わせごとに 1 行として保存する。
@@ -73,7 +84,7 @@ Reuters の URL は `endpoint_url` に固定値 `https://jp.reuters.com` を保�
 | `updated_at` | `TIMESTAMPTZ` | 取得元更新日時 |
 | `headline` | `TEXT` | 見出し |
 | `body_text` | `TEXT` | プレーンテキスト本文 |
-| `raw_payload` | `JSONB` | 取得時の正規化データ。Reuters の上限超過時はサイズと SHA-256 |
+| `raw_payload` | `JSONB` | 取得時のデータ。Reuters / Fisco の上限超過時はサイズと SHA-256 |
 | `fetched_at` | `TIMESTAMPTZ` | その行を初めて保存した取得日時。上書き時も維持 |
 
 `(source_id, external_id, COALESCE(updated_at, published_at, '-infinity'::timestamptz))` を一意キーとする。
@@ -85,6 +96,8 @@ Reuters の URL は `endpoint_url` に固定値 `https://jp.reuters.com` を保�
 RSS の `external_id` は GUID、リンク、安定情報の SHA-256 の順で決める。
 RSS にリビジョンがない場合は、見出し、本文、更新日時から SHA-256 を計算する。
 Reuters は API の `id` と `revision_id` を使用する。
+Fisco は一覧の `newsId` を `external_id` とし、見出し、公開日時、本文から `revision_id` の SHA-256 を計算する。
+Fisco の公開日時には一覧の `newsDateTime` を日本時間（UTC+9）として使用し、更新日時は未設定とする。
 更新日時を変えずに本文やリビジョンだけが変化した場合も、保存行は増えない。
 
 通常画面の JSON API と MCP では `COALESCE(published_at, fetched_at)` を記事の実効日時として扱う。
@@ -157,3 +170,6 @@ SQL はバイナリへ埋め込み、起動設定 `postgres.auto_migrate` が有
 
 `006_article_retention.sql` は、`COALESCE(updated_at, published_at, fetched_at)` の式インデックスを作成する。
 索引の作成だけでは記事を削除せず、保持設定が有効な場合の期限検索に使用する。適用済み SQL のチェックサムは維持する。
+
+`007_fisco_connector.sql` は `news_sources_kind_check` を置き換え、`rss`、`reuters` に加えて `fisco` を許可する。
+既存の取得対象と記事は保持し、適用済みの初期マイグレーションは変更しない。

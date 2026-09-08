@@ -55,7 +55,7 @@ DefaultArticleLimit = 20
 
 - `id`: `news_sources.id`
 - `name`: 管理画面で設定した取得対象名
-- `kind`: `rss` または `reuters`
+- `kind`: `rss`、`reuters`、`fisco` のいずれか
 - `enabled`: 現在の有効状態
 
 ## `search_articles`

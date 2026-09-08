@@ -16,7 +16,8 @@ NewsStore は、RSS/Atom フィードと個別の REST API からニュース記
 3. DB に保存された取得対象を定期確認するスケジューラー
 4. RSS/Atom コネクタ
 5. Reuters コネクタ
-6. PostgreSQL への冪等保存
+6. Fisco コネクタ
+7. PostgreSQL への冪等保存
 
 外部取得、DB 保存、Web 表示はパッケージ境界で分離し、将来 Web とワーカーを別プロセスへ分けられるようにする。
 
@@ -29,6 +30,7 @@ internal/domain/                取得対象、記事、取得結果
 internal/connector/             コネクタ共通インターフェースと選択
 internal/connector/rss/         RSS/Atom の取得と本文抽出
 internal/connector/reuters/     Reuters の一覧・詳細 API
+internal/connector/fisco/       Fisco の一覧・詳細 API
 internal/ingest/                取得実行、検証、冪等保存、実行結果集計
 internal/scheduler/             定期取得と手動取得キュー
 internal/mcpserver/             読み取り専用 MCP と記事参照用 DTO
@@ -100,12 +102,14 @@ MCP リクエストは `application/json` と 1 MiB の本文上限を適用し�
 
 取得対象の共通欄とコネクタ固有欄を分け、選択中の種類に対応する RSS または Reuters 固有欄だけを排他表示する。
 非表示側の入力は無効化し、サーバー側でもコネクタ種別に不要な値を保存しない。
+Fisco には固有入力欄を設けず、共通欄だけを表示する。
 
 RSS ではフィード URL とリンク先本文抽出の有無を入力する。
 Reuters では URL や内部 API パラメーターを入力させず、利用者は「取得内容」だけをサーバー定義のホワイトリストから選択する。
 選択値はサーバー側で `section_id` へ変換する。
 全取得対象は現行一覧 API への実通信で検証する。
 日本は `/world/japan/` を使用し、旧版で保存された `/ja/` は読み込み時に現行値へ変換する。
+Fisco は取得先 URL、一覧 API、詳細 API を固定し、カテゴリや取得内容を選択しない。最大取得件数は 1 以上 50 以下とする。
 
 ## 処理の流れ
 
@@ -115,7 +119,7 @@ Reuters では URL や内部 API パラメーターを入力させず、利用�
    └─手動取得──> ジョブキュー ─┐
                                ├─> ingest.Service
 スケジューラー ──期限到来──────┘       │
-                                      ├─> RSS または Reuters
+                                      ├─> RSS / Reuters / Fisco
                                       ├─> news_articles（ON CONFLICT）
                                       └─> ingestion_runs / news_sources
 ```
@@ -131,6 +135,7 @@ Reuters では URL や内部 API パラメーターを入力させず、利用�
 9. Reuters は DB の `endpoint_url` に `https://jp.reuters.com` を保持し、`settings` には選択した `section_id` だけを新規保存する。
 10. Reuters コネクタは `website=reuters-japan`、`offset=0`、一覧 API、詳細 API をコード上の固定値で補完する。
 11. `[retention] enabled = true` の場合だけ、起動時と 1 時間ごとに `COALESCE(updated_at, published_at, fetched_at) <= CURRENT_TIMESTAMP - INTERVAL '168 hours'` の記事を削除し、保存時も期限切れ記事を省略する。取得対象の設定と取得履歴は残す。`false` または未指定の場合は両処理を無効にする。
+12. Fisco は DB の `endpoint_url` に `https://web.fisco.jp/FiscoWeb/news`、`settings` に `{}` を保存する。一覧の `isRemarkable=false` は固定し、`limit` に `max_items` を反映する。一覧の `newsId` ごとに詳細を取得し、一覧の見出しと日本時間の公開日時、詳細の `news.newsReport` を共通記事へ変換する。
 
 通常画面の JSON API と MCP の参照経路は取得処理から分離し、記事検索と本文分割の PostgreSQL Repository を共有する。
 

@@ -248,7 +248,7 @@ newTestService は、偽 Repository と偽コネクタから記事取得サー�
 */
 func newTestService(repository *fakeRepository, fetcher *fakeFetcher) *Service {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(repository, connector.NewRegistry(fetcher, fetcher), logger)
+	return New(repository, connector.NewRegistry(fetcher, fetcher, fetcher), logger)
 }
 
 // ----------------------------------------

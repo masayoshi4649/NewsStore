@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/masayoshi4649/NewsStore/internal/connector"
+	"github.com/masayoshi4649/NewsStore/internal/connector/fisco"
 	"github.com/masayoshi4649/NewsStore/internal/connector/reuters"
 	"github.com/masayoshi4649/NewsStore/internal/domain"
 	"github.com/masayoshi4649/NewsStore/internal/store/postgres"
@@ -91,6 +92,7 @@ buildSourceListItems は、取得対象へ種類別の一覧説明を付与し�
 機能:
   - RSSはフィードURLを説明として使用する
   - Reutersは固定URLではなく選択された記事分野を表示する
+  - Fiscoはカテゴリを持たないニュース取得対象として表示する
 
 引数:
   - sources []domain.Source: Repositoryから読み込んだ取得対象一覧
@@ -109,6 +111,8 @@ func buildSourceListItems(sources []domain.Source) []sourceListItem {
 			} else {
 				description = "Reuters 日本語版"
 			}
+		} else if source.Kind == domain.SourceKindFisco {
+			description = "Fisco ニュース"
 		}
 		items = append(items, sourceListItem{
 			Source:      source,
@@ -487,8 +491,9 @@ parseSourceForm は、HTTP フォームを取得対象と表示用フォーム�
 機能:
   - 数値項目を範囲検証可能な整数へ解析する
   - 種別ごとの settings JSON を生成する
-  - RSSでは入力URL、Reutersでは定義済み固定URLを使用する
+  - RSSでは入力URL、ReutersとFiscoでは定義済み固定URLを使用する
   - Reutersの取得内容をホワイトリストで検証する
+  - FiscoではRSSとReutersの固有項目を無視する
 
 引数:
   - c *gin.Context: POST フォームを持つ Gin コンテキスト
@@ -508,6 +513,11 @@ func parseSourceForm(c *gin.Context, id int64) (sourceForm, domain.Source, error
 		Enabled:          c.PostForm("enabled") == "on",
 		FetchFullArticle: c.PostForm("fetch_full_article") == "on",
 		ReutersTarget:    strings.TrimSpace(c.PostForm("reuters_target")),
+	}
+	if form.Kind == domain.SourceKindFisco {
+		form.EndpointURL = fisco.EndpointURL
+		form.FetchFullArticle = false
+		form.ReutersTarget = ""
 	}
 
 	interval, err := parseFormInteger(c.PostForm("fetch_interval_minutes"), "取得間隔")
@@ -558,6 +568,7 @@ sourceSettings は、フォームからコネクタ固有 JSON を生成しま�
 機能:
   - RSS にはリンク先本文取得設定を保存する
   - Reuters には選択肢に対応するsection_idだけを保存する
+  - 固有設定がないFiscoには空のJSONオブジェクトを保存する
 
 引数:
   - form sourceForm: コネクタ固有の入力値を持つフォーム
@@ -599,6 +610,7 @@ sourceToForm は、保存済み取得対象を編集フォームへ変換しま�
 機能:
   - 共通項目をコピーする
   - settings JSON の RSS/Reuters 項目を既定値付きで読み込む
+  - Fiscoは固定URLを使用し、他コネクタの固有設定を読み込まない
 
 引数:
   - source domain.Source: DB から読み込んだ取得対象
@@ -617,6 +629,12 @@ func sourceToForm(source domain.Source) sourceForm {
 		MaxItems:             source.MaxItems,
 		ReutersTarget:        reuters.DefaultTargetID,
 	}
+	if source.Kind == domain.SourceKindFisco {
+		form.EndpointURL = fisco.EndpointURL
+		form.ReutersTarget = ""
+		return form
+	}
+
 	var settings struct {
 		FetchFullArticle bool   `json:"fetch_full_article"`
 		SectionID        string `json:"section_id"`

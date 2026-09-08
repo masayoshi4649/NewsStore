@@ -13,6 +13,8 @@ const (
 	SourceKindRSS SourceKind = "rss"
 	// SourceKindReuters は、Reuters APIから取得するコネクタ種別を表します。
 	SourceKindReuters SourceKind = "reuters"
+	// SourceKindFisco は、Fisco APIから取得するコネクタ種別を表します。
+	SourceKindFisco SourceKind = "fisco"
 )
 
 // Source は、記事取得元とその実行設定を表します。

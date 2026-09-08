@@ -578,7 +578,7 @@ func statusLabel(status postgres.RunStatus) string {
 kindLabel は、取得対象種別を管理画面向け表示へ変換します。
 
 機能:
-  - rss と reuters を利用者向けラベルへ対応付ける
+  - rss、reuters、fisco を利用者向けラベルへ対応付ける
 
 引数:
   - kind any: 文字列化できる取得対象種別
@@ -592,6 +592,8 @@ func kindLabel(kind any) string {
 		return "RSS / Atom"
 	case "reuters":
 		return "Reuters"
+	case "fisco":
+		return "Fisco"
 	default:
 		return fmt.Sprint(kind)
 	}

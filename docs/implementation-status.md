@@ -6,13 +6,15 @@
 
 - [x] `conf/system.toml`、`conf/mcp.toml`、`conf/postgres.toml`、`conf/retention.toml` を名前順に読み、未知項目をエラーにする
 - [x] PostgreSQL の初期スキーマを自動適用できる
-- [x] 管理画面から RSS/Reuters 取得対象を登録、変更、無効化できる
+- [x] 管理画面から RSS / Reuters / Fisco 取得対象を登録、変更、無効化できる
 - [x] 管理画面から取得をキューへ投入できる
 - [x] 定期実行で期限到来した取得対象を処理できる
 - [x] RSS/Atom の見出しと本文を保存できる
 - [x] Reuters の一覧・詳細 API から見出しと本文を保存できる
+- [x] Fisco の固定一覧・詳細 API から、一覧の見出しと日本時間の公開日時、詳細の本文を保存できる
 - [x] 管理画面はダークテーマを既定とし、RSS / Reuters 固有欄を種類に応じて排他表示する
 - [x] Reuters の取得内容をホワイトリストから選択し、URL と内部 API 設定を固定できる
+- [x] Fisco はカテゴリや取得内容、取得先 URL の固有入力なしで登録し、最大取得件数を一覧 API の `limit` へ反映できる
 - [x] 同じ取得対象・外部記事 ID・更新日時の記事は、リビジョンが変わっても 1 行へ上書きされる
 - [x] `[retention] enabled` で 7 日保持の自動削除と期限切れ記事の保存省略を切り替え、既定値と未指定時は両方を無効にできる
 - [x] 記事と取得履歴を管理画面で確認できる
@@ -92,6 +94,9 @@
 51. `005_article_timestamp_identity.sql` で既存の同日時重複を整理して保存キーを変更する。
 52. `conf/retention.toml` の `[retention] enabled` は既定 `false`、未指定時も無効とする。`true` の場合だけ `COALESCE(updated_at, published_at, fetched_at) <= CURRENT_TIMESTAMP - INTERVAL '168 hours'` の記事を起動時と 1 時間ごとに削除し、保存時も期限切れ記事を省略する。上書き時は `fetched_at` を維持し、取得対象の設定と取得履歴は削除しない。設定は再起動で反映し、同日時上書きはこの設定にかかわらず有効とする。
 53. `006_article_retention.sql` は期限検索用インデックスだけを作成し、記事削除そのものは保持設定が有効な場合にアプリケーションから実行する。
+54. Fisco は `https://web.fisco.jp/FiscoWeb/news` を `endpoint_url` に、`{}` を `settings` に保存する。カテゴリや取得内容を選択せず、一覧の `isRemarkable=false` は固定し、`limit` に共通設定 `max_items`（1 以上 50 以下）を反映する。
+55. Fisco は一覧の `newsId` で詳細 API を毎回取得し、`news.newsReport` を本文とする。一覧の `newsTitle` と日本時間（UTC+9）の `newsDateTime` を見出しと公開日時に使用し、更新日時は未設定とする。見出し、公開日時、本文の SHA-256 をリビジョンとし、元記事リンクは `https://web.fisco.jp/platform/market-news/<newsId>` に固定する。
+56. `007_fisco_connector.sql` で取得対象の種類制約に `fisco` を追加し、適用済みの初期マイグレーションは維持する。
 
 ## 検証記録
 
@@ -104,6 +109,9 @@
 - `go version -m` とファイルヘッダーによる Windows PE / Linux ELF、対象 OS、対象アーキテクチャの確認
 - 公式 MCP クライアントによる Streamable HTTP の初期化、tool 一覧、取得対象一覧、複数条件の記事検索、本文分割
 - 実 PostgreSQL に対する `list_sources`、`search_articles`、`get_article`
+- 実 PostgreSQL の独立した一時スキーマで `TestLiveFiscoConnectorMigration` が成功。既存 RSS / Reuters の保持、Fisco の登録・更新、未対応種別の拒否、マイグレーション再実行を確認
+- Fisco の実通信テスト `TestLiveFiscoEndpoint` が成功。本番と同じ通信制御で最新記事の見出し、本文、取得元、日本時間の公開日時を確認
+- Fisco 追加後に `.\test.ps1`、`.\build.ps1` が順に成功。Windows / Linux の実行ファイルを更新し、両配布先の設定サンプル、README、LICENSE が元ファイルと一致することを確認
 - 記事 JSON API の取得対象一覧、無条件・全条件検索、日時順カーソル、本文分割、入力制約、内部エラー秘匿
 - Axios 記事画面の空シェル、既定で閉じた検索パネル、Grid.js の 10 件ローカルページング、ヘッドラインのみの一覧、空状態、エラー状態、記事詳細の「続きを読む」、安全なテキスト・URL 描画
 
@@ -132,6 +140,23 @@ $env:NEWSSTORE_TEST_REUTERS_LIVE = "1"
 go test -count=1 -run LiveReuters -v ./internal/connector/reuters
 ```
 
+Fisco の一覧と記事詳細を任意に実通信確認する場合は、次のコマンドを使用する。
+
+```powershell
+$env:NEWSSTORE_TEST_FISCO_LIVE = "1"
+go test -count=1 -run '^TestLiveFiscoEndpoint$' -v ./internal/connector/fisco
+Remove-Item Env:NEWSSTORE_TEST_FISCO_LIVE
+```
+
+Fisco 追加のマイグレーションを実 PostgreSQL で確認する場合は、次のコマンドを使用する。
+テストは独立した一時スキーマを作成して検証し、終了時に削除する。
+
+```powershell
+$env:NEWSSTORE_TEST_POSTGRES_WRITE_LIVE = "1"
+go test -count=1 -run '^TestLiveFiscoConnectorMigration$' -v ./internal/store/postgres
+Remove-Item Env:NEWSSTORE_TEST_POSTGRES_WRITE_LIVE
+```
+
 PostgreSQL 初期スキーマ適用後は、次のコマンドで新4テーブルの存在と旧1語テーブルの不存在を実DB確認できる。
 
 ```powershell
@@ -140,4 +165,4 @@ $env:NEWSSTORE_TEST_POSTGRES_CONF = (Resolve-Path conf).Path
 go test -count=1 -run TestLiveSchemaUsesTwoWordTableNames -v ./internal/store/postgres
 ```
 
-実環境への導入時は、対象 PostgreSQL でマイグレーション、`pg_trgm` 作成権限、advisory lock、および RSS/Reuters の実通信を確認する。
+実環境への導入時は、対象 PostgreSQL でマイグレーション、`pg_trgm` 作成権限、advisory lock、および RSS / Reuters / Fisco の実通信を確認する。

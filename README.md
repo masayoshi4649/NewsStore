@@ -1,6 +1,6 @@
 # NewsStore
 
-RSS / Atom と Reuters からニュース記事の見出し・本文を取得し、PostgreSQL へ記事の更新日時単位で保存する Go アプリです。
+RSS / Atom、Reuters、Fisco からニュース記事の見出し・本文を取得し、PostgreSQL へ記事の更新日時単位で保存する Go アプリです。
 Gin 製の管理画面から取得対象、記事、取得履歴を管理できます。
 通常の記事画面は同一オリジンの JSON API を Axios から呼び出して表示します。
 保存済み記事は、同じ HTTP サーバーの読み取り専用 MCP から参照できます。
@@ -14,6 +14,7 @@ Gin 製の管理画面から取得対象、記事、取得履歴を管理でき�
 - RSS 2.0 / Atom の見出し・本文取得
 - 任意設定による RSS リンク先の本文抽出
 - Reuters の一覧・詳細 API を使った見出し・本文取得
+- Fisco の一覧・詳細 API を使った見出し・本文取得
 - DB 一意制約と `ON CONFLICT` による冪等保存
 - 取得間隔に基づく定期実行
 - キューを使った非同期の手動取得
@@ -205,12 +206,24 @@ DB の `news_sources.endpoint_url` には固定 URL を保持し、`settings` �
 Reuters コネクタは、`masayoshi4649/GetArticleFromReuters` で確認した通信仕様を基に独立実装しています。
 利用する API は公開 Web の内部 API であり、Reuters の仕様変更で取得できなくなる可能性があります。
 
+### Fisco の登録例
+
+- コネクタ: `Fisco`
+- 最大取得件数: 1 以上 50 以下の必要な件数
+
+Fisco はカテゴリや取得内容の選択、取得先 URL の入力が不要です。
+設定名、取得間隔、最大取得件数、有効状態を指定して登録します。
+一覧 API は `https://web.fisco.jp/FiscoWeb/news?isRemarkable=false&limit=<最大取得件数>` に固定し、一覧の `newsId` ごとに詳細 API から本文を取得します。
+DB の `news_sources.endpoint_url` には固定 URL `https://web.fisco.jp/FiscoWeb/news`、`settings` には空の JSON オブジェクト `{}` を保存します。
+タイトルは一覧の `newsTitle`、公開日時は一覧の `newsDateTime` を日本時間として使用し、本文は詳細の `news.newsReport` を保存します。
+保存済み記事の元記事リンクは `https://web.fisco.jp/platform/market-news/<newsId>` です。
+
 ### RSS / Atom の登録
 
 取得先 URL へフィード URL を指定します。
 「リンク先ページから本文を抽出する」を有効にすると、リンク先の `article`、`main`、`body` 内の段落を順に探索します。
 抽出できない場合はフィード内の本文または説明へフォールバックします。
-RSS / Atom を選択している間は Reuters 固有欄を表示せず、Reuters を選択している間は RSS 固有欄を表示しません。
+RSS / Atom と Reuters は選択中のコネクタに対応する固有欄だけを表示します。Fisco を選択した場合は、RSS / Reuters の固有入力欄を表示しません。
 
 取得先サイトの利用規約、robots 方針、適切な取得間隔を確認したうえで登録してください。
 

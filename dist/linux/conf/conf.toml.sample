@@ -1,0 +1,36 @@
+# NewsStore 設定サンプル
+#
+# 使用時は内容をconf直下の.tomlファイルへコピーしてください。
+# SYSTEMとPostgreSQLをsystem.toml、postgres.tomlへ分割しても読み込めます。
+# この.sampleファイル自体は読み込みません。
+
+[SYSTEM]
+# 閉域ネットワーク内へ公開するHTTPサーバーの待受ポートです。
+Port = 8080
+
+[MCP]
+# 検索条件を省略した場合に、新しい記事から返す既定件数です。
+# 1以上100以下で指定します。
+DefaultArticleLimit = 20
+
+[retention]
+# true の場合、起動時と 1 時間ごとに 7 日以上前の記事を削除します。
+# 更新日時、投稿日時、取得日時の順で判定し、期限切れ記事の新規保存も抑止します。
+# false または未指定の場合、保持期間による自動削除と保存抑止を行いません。
+enabled = false
+
+[postgres]
+host = "127.0.0.1"
+port = 5432
+username = "newsstore"
+password = "change-me"
+dbname = "newsstore"
+
+# TLS対応サーバーではrequireを使用します。
+# TLS非対応かつ通信経路が閉域網内に限定される場合だけdisableへ変更します。
+sslmode = "require"
+
+# advisory lock用接続を含め、ワーカー並列数の2倍以上にします。
+max_open_conns = 25
+max_idle_conns = 5
+auto_migrate = true

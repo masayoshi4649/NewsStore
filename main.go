@@ -17,6 +17,7 @@ import (
 
 	"github.com/masayoshi4649/NewsStore/internal/config"
 	"github.com/masayoshi4649/NewsStore/internal/connector"
+	"github.com/masayoshi4649/NewsStore/internal/connector/fisco"
 	"github.com/masayoshi4649/NewsStore/internal/connector/reuters"
 	"github.com/masayoshi4649/NewsStore/internal/connector/rss"
 	"github.com/masayoshi4649/NewsStore/internal/ingest"
@@ -141,6 +142,7 @@ func run(args []string) error {
 	registry := connector.NewRegistry(
 		rss.New(httpClient, cfg.HTTP.UserAgent, cfg.HTTP.MaxResponseBytes),
 		reutersConnector,
+		fisco.New(httpClient, cfg.HTTP.UserAgent, cfg.HTTP.MaxResponseBytes),
 	)
 	ingestService := ingest.New(store, registry, logger)
 

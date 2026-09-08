@@ -23,7 +23,7 @@ type Registry struct {
 }
 
 /*
-NewRegistry は、RSS と Reuters のコネクタ一覧を生成します。
+NewRegistry は、RSS、Reuters、Fisco のコネクタ一覧を生成します。
 
 機能:
   - 取得対象種別とコネクタ実装を対応付ける
@@ -31,15 +31,17 @@ NewRegistry は、RSS と Reuters のコネクタ一覧を生成します。
 引数:
   - rss Fetcher: RSS/Atom 取得に使用するコネクタ
   - reuters Fetcher: Reuters 取得に使用するコネクタ
+  - fisco Fetcher: Fisco 取得に使用するコネクタ
 
 返り値:
   - *Registry: 初期化済みのコネクタ一覧
 */
-func NewRegistry(rss Fetcher, reuters Fetcher) *Registry {
+func NewRegistry(rss Fetcher, reuters Fetcher, fisco Fetcher) *Registry {
 	return &Registry{
 		fetchers: map[domain.SourceKind]Fetcher{
 			domain.SourceKindRSS:     rss,
 			domain.SourceKindReuters: reuters,
+			domain.SourceKindFisco:   fisco,
 		},
 	}
 }
@@ -92,10 +94,12 @@ func ValidateSource(source domain.Source) error {
 	if strings.TrimSpace(source.Name) == "" {
 		validationErrors = append(validationErrors, errors.New("名前は必須です"))
 	}
-	if source.Kind != domain.SourceKindRSS && source.Kind != domain.SourceKindReuters {
+	if source.Kind != domain.SourceKindRSS &&
+		source.Kind != domain.SourceKindReuters &&
+		source.Kind != domain.SourceKindFisco {
 		validationErrors = append(
 			validationErrors,
-			fmt.Errorf("コネクタ種別は rss または reuters を指定してください: %q", source.Kind),
+			fmt.Errorf("コネクタ種別は rss、reuters、fisco のいずれかを指定してください: %q", source.Kind),
 		)
 	}
 

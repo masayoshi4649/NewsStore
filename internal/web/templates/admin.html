@@ -83,7 +83,7 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
     <div>
       <p class="eyebrow">収集設定</p>
       <h1 class="title is-2">取得対象</h1>
-      <p class="subtitle is-6 has-text-grey">RSS / Atom と Reuters の取得先、間隔、最大件数を管理します。</p>
+      <p class="subtitle is-6 has-text-grey">RSS / Atom、Reuters、Fisco の取得先、間隔、最大件数を管理します。</p>
     </div>
   </div>
   <div class="level-right">
@@ -191,7 +191,7 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
 {{else}}
 <section class="box empty-state">
   <h2 class="title is-4">取得対象がありません</h2>
-  <p class="has-text-grey mb-5">最初の RSS フィード、または Reuters セクションを追加してください。</p>
+  <p class="has-text-grey mb-5">RSS / Atom、Reuters、Fisco から取得対象を追加してください。</p>
   <a class="button is-link" href="/admin/sources/new">取得対象を追加</a>
 </section>
 {{end}}
@@ -215,7 +215,7 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
 
 <!--
 #source-form は取得対象を作成または更新する Bulma box フォームです。
-#source-kind は RSS と Reuters のコネクタ種別を指定します。
+#source-kind は RSS、Reuters、Fisco のコネクタ種別を指定します。
 #endpoint-url は RSS / Atom のフィード URL だけを指定します。
 #reuters-target は定義済みの Reuters 取得内容から選択します。
 
@@ -224,6 +224,7 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
 
 .reuters-fields は固定 URL を使用する Reuters の取得内容選択をまとめます。
 .rss-fields は RSS URL とリンク先本文取得設定をまとめます。
+.fisco-fields は固有の入力項目を持たない Fisco の取得内容を説明します。
 -->
 <form id="source-form" class="box form-box" method="post"
   action="{{if .IsEdit}}/admin/sources/{{.Form.ID}}{{else}}/admin/sources{{end}}">
@@ -248,6 +249,7 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
             <select id="source-kind" name="kind" required>
               <option value="rss" {{if eq .Form.Kind "rss"}}selected{{end}}>RSS / Atom</option>
               <option value="reuters" {{if eq .Form.Kind "reuters"}}selected{{end}}>Reuters</option>
+              <option value="fisco" {{if eq .Form.Kind "fisco"}}selected{{end}}>Fisco</option>
             </select>
           </div>
         </div>
@@ -336,6 +338,13 @@ Bulma の状態クラスを使用し、選択中のメニューを視覚的に�
       <p class="help">一覧APIで記事を選び、詳細APIから見出しと本文を取得します。URLや内部API設定の入力は不要です。</p>
     </div>
     <p class="help">Reuters 公開 Web の内部 API 仕様に依存するため、仕様変更時は取得履歴のエラーを確認してください。</p>
+  </section>
+
+  <section class="connector-fields fisco-fields" data-connector-fields="fisco"
+    {{if ne .Form.Kind "fisco"}}hidden{{end}}>
+    <h2 class="title is-5">Fisco ニュース</h2>
+    <p>最新ニュースの見出し・日時・本文を取得します。</p>
+    <p class="help">取得間隔と最大取得件数を指定してください。追加の設定はありません。</p>
   </section>
 
   <div class="field is-grouped mt-6">

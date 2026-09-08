@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/masayoshi4649/NewsStore/internal/connector/fisco"
 	"github.com/masayoshi4649/NewsStore/internal/connector/reuters"
 	"github.com/masayoshi4649/NewsStore/internal/domain"
 )
@@ -184,8 +185,8 @@ func TestBuildSourceListItemsShowsReutersTarget(test *testing.T) {
 TestSourceFormTemplateSeparatesConnectorFields は、種類ごとに固有設定欄が排他的になることを検証します。
 
 機能:
-  - RSS表示ではReuters欄をhiddenかつdisabledにする
-  - Reuters表示ではRSS欄をhiddenかつdisabledにする
+  - RSS、Reuters、Fiscoの選択時に他コネクタの欄をhiddenかつdisabledにする
+  - Fiscoには固有の入力項目を表示しない
   - ダークテーマとフォーム切替JavaScriptを読み込む
 
 引数:
@@ -203,24 +204,30 @@ func TestSourceFormTemplateSeparatesConnectorFields(test *testing.T) {
 	}
 
 	testCases := []struct {
-		name          string
-		kind          domain.SourceKind
-		hiddenKind    string
-		disabledField string
-		reutersTarget string
+		name           string
+		kind           domain.SourceKind
+		hiddenKinds    []string
+		disabledFields []string
+		reutersTarget  string
 	}{
 		{
-			name:          "RSS",
-			kind:          domain.SourceKindRSS,
-			hiddenKind:    "reuters",
-			disabledField: `id="reuters-target"`,
+			name:           "RSS",
+			kind:           domain.SourceKindRSS,
+			hiddenKinds:    []string{"reuters", "fisco"},
+			disabledFields: []string{`id="reuters-target"`},
 		},
 		{
-			name:          "Reuters",
-			kind:          domain.SourceKindReuters,
-			hiddenKind:    "rss",
-			disabledField: `id="endpoint-url"`,
-			reutersTarget: "economy",
+			name:           "Reuters",
+			kind:           domain.SourceKindReuters,
+			hiddenKinds:    []string{"rss", "fisco"},
+			disabledFields: []string{`id="endpoint-url"`, `name="fetch_full_article"`},
+			reutersTarget:  "economy",
+		},
+		{
+			name:           "Fisco",
+			kind:           domain.SourceKindFisco,
+			hiddenKinds:    []string{"rss", "reuters"},
+			disabledFields: []string{`id="endpoint-url"`, `name="fetch_full_article"`, `id="reuters-target"`},
 		},
 	}
 
@@ -243,17 +250,40 @@ func TestSourceFormTemplateSeparatesConnectorFields(test *testing.T) {
 			}
 
 			body := output.String()
-			hiddenMarker := `data-connector-fields="` + testCase.hiddenKind + `"` + "\n    hidden"
-			if !strings.Contains(body, hiddenMarker) {
-				test.Errorf("非選択欄がhiddenではありません: marker=%q", hiddenMarker)
+			for _, hiddenKind := range testCase.hiddenKinds {
+				hiddenMarker := `data-connector-fields="` + hiddenKind + `"` + "\n    hidden"
+				if !strings.Contains(body, hiddenMarker) {
+					test.Errorf("非選択欄がhiddenではありません: marker=%q", hiddenMarker)
+				}
 			}
-			fieldIndex := strings.Index(body, testCase.disabledField)
-			if fieldIndex < 0 {
-				test.Fatalf("入力項目が見つかりません: %s", testCase.disabledField)
+			for _, disabledField := range testCase.disabledFields {
+				fieldIndex := strings.Index(body, disabledField)
+				if fieldIndex < 0 {
+					test.Fatalf("入力項目が見つかりません: %s", disabledField)
+				}
+				fieldEnd := strings.Index(body[fieldIndex:], ">")
+				if fieldEnd < 0 || !strings.Contains(body[fieldIndex:fieldIndex+fieldEnd], "disabled") {
+					test.Errorf("非選択欄の入力項目がdisabledではありません: %s", disabledField)
+				}
 			}
-			fieldEnd := strings.Index(body[fieldIndex:], ">")
-			if fieldEnd < 0 || !strings.Contains(body[fieldIndex:fieldIndex+fieldEnd], "disabled") {
-				test.Errorf("非選択欄の入力項目がdisabledではありません: %s", testCase.disabledField)
+			if testCase.kind == domain.SourceKindFisco {
+				if !strings.Contains(body, `<option value="fisco" selected>Fisco</option>`) {
+					test.Error("Fiscoの選択状態が反映されていません")
+				}
+				sectionStart := strings.Index(body, `data-connector-fields="fisco"`)
+				if sectionStart < 0 {
+					test.Fatal("Fiscoの取得内容説明がありません")
+				}
+				sectionEnd := strings.Index(body[sectionStart:], "</section>")
+				if sectionEnd < 0 {
+					test.Fatal("Fiscoの取得内容説明が閉じられていません")
+				}
+				section := body[sectionStart : sectionStart+sectionEnd]
+				for _, forbidden := range []string{"hidden", "<input", "<select", "<textarea"} {
+					if strings.Contains(section, forbidden) {
+						test.Errorf("Fiscoの説明に不要な属性または入力要素があります: %q", forbidden)
+					}
+				}
 			}
 			if !strings.Contains(body, `<html lang="ja" data-theme="dark">`) {
 				test.Error("ダークテーマが既定になっていません")
@@ -262,6 +292,132 @@ func TestSourceFormTemplateSeparatesConnectorFields(test *testing.T) {
 				test.Error("フォーム切替JavaScriptが読み込まれていません")
 			}
 		})
+	}
+}
+
+// ----------------------------------------
+
+/*
+TestParseSourceFormFixesFiscoEndpoint は、Fiscoが共通設定だけで保存できることを検証します。
+
+機能:
+  - 投稿されたURLとRSS・Reutersの固有項目を無視する
+  - 固定URL、共通の最大取得件数、空のJSON設定を保存する
+  - 数値入力エラー時もFiscoの再表示内容へ不要な固有設定を残さない
+
+引数:
+  - test *testing.T: Fiscoフォーム変換を検証するテスト状態
+
+返り値:
+  - なし
+*/
+func TestParseSourceFormFixesFiscoEndpoint(test *testing.T) {
+	test.Parallel()
+
+	for _, maxItems := range []string{"10", "不正な件数"} {
+		test.Run(maxItems, func(test *testing.T) {
+			form, source, err := parseTestSourceForm(test, url.Values{
+				"name":                   {"Fiscoニュース"},
+				"kind":                   {"fisco"},
+				"endpoint_url":           {"https://untrusted.example/api"},
+				"enabled":                {"on"},
+				"fetch_interval_minutes": {"30"},
+				"max_items":              {maxItems},
+				"fetch_full_article":     {"on"},
+				"reuters_target":         {"unsupported"},
+			})
+			if form.EndpointURL != fisco.EndpointURL || form.FetchFullArticle || form.ReutersTarget != "" {
+				test.Errorf("Fiscoのフォームへ不要な固有設定が残っています: %#v", form)
+			}
+			if maxItems != "10" {
+				if err == nil || !strings.Contains(err.Error(), "最大取得件数") {
+					test.Errorf("最大取得件数の入力エラーが返されません: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				test.Fatalf("Fiscoのフォームを変換できません: %v", err)
+			}
+			if source.Kind != domain.SourceKindFisco || source.EndpointURL != fisco.EndpointURL {
+				test.Errorf("Fiscoの種別または固定URLが一致しません: %#v", source)
+			}
+			if source.MaxItems != 10 || source.FetchIntervalMinutes != 30 || !source.Enabled {
+				test.Errorf("Fiscoの共通設定が一致しません: %#v", source)
+			}
+			if string(source.Settings) != "{}" {
+				test.Errorf("Fisco設定へ不要な項目が保存されました: %s", source.Settings)
+			}
+		})
+	}
+}
+
+// ----------------------------------------
+
+/*
+TestSourceToFormRestoresFisco は、保存済みFiscoを固有設定なしで編集できることを検証します。
+
+機能:
+  - 編集対象のID、名前、取得間隔、最大取得件数を復元する
+  - 保存値にかかわらず固定URLを使用し、他コネクタの固有設定を無視する
+
+引数:
+  - test *testing.T: Fisco編集フォームを検証するテスト状態
+
+返り値:
+  - なし
+*/
+func TestSourceToFormRestoresFisco(test *testing.T) {
+	test.Parallel()
+
+	form := sourceToForm(domain.Source{
+		ID:                   42,
+		Name:                 "Fiscoニュース",
+		Kind:                 domain.SourceKindFisco,
+		EndpointURL:          "https://untrusted.example/api",
+		Enabled:              true,
+		FetchIntervalMinutes: 30,
+		MaxItems:             10,
+		Settings:             json.RawMessage(`{"fetch_full_article":true,"section_id":"/world/"}`),
+	})
+	if form.ID != 42 || form.Name != "Fiscoニュース" || form.Kind != domain.SourceKindFisco ||
+		!form.Enabled || form.FetchIntervalMinutes != 30 || form.MaxItems != 10 {
+		test.Errorf("Fiscoの共通設定が復元されません: %#v", form)
+	}
+	if form.EndpointURL != fisco.EndpointURL || form.FetchFullArticle || form.ReutersTarget != "" {
+		test.Errorf("Fiscoの編集フォームへ不要な固有設定が残っています: %#v", form)
+	}
+}
+
+// ----------------------------------------
+
+/*
+TestBuildSourceListItemsShowsFisco は、Fisco一覧表示がカテゴリを要求しないことを検証します。
+
+機能:
+  - 固有設定なしでFiscoのニュース説明とコネクタ表示名を生成する
+
+引数:
+  - test *testing.T: 取得対象一覧の表示変換を検証するテスト状態
+
+返り値:
+  - なし
+*/
+func TestBuildSourceListItemsShowsFisco(test *testing.T) {
+	test.Parallel()
+
+	items := buildSourceListItems([]domain.Source{{
+		Kind:        domain.SourceKindFisco,
+		EndpointURL: fisco.EndpointURL,
+		Settings:    json.RawMessage(`{}`),
+	}})
+	if len(items) != 1 {
+		test.Fatalf("一覧件数 = %d, 期待値は1", len(items))
+	}
+	if items[0].Description != "Fisco ニュース" {
+		test.Errorf("Fiscoの一覧説明が一致しません: %q", items[0].Description)
+	}
+	if label := kindLabel(items[0].Kind); label != "Fisco" {
+		test.Errorf("Fiscoの表示名が一致しません: %q", label)
 	}
 }
 
